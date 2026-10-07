@@ -16,6 +16,17 @@ android {
         versionName = "1.0.0"
     }
 
+    // Firma fija (solo de depuración, no es un secreto): permite instalar cada versión nueva ENCIMA de la anterior
+    // sin desinstalar, así no se pierden la clave de Gemini ni los ajustes.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("aiquickassist-debug.keystore")
+            storePassword = "android"
+            keyAlias = "aiqa"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
