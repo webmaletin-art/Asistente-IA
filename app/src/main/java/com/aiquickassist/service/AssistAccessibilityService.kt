@@ -41,6 +41,13 @@ class AssistAccessibilityService : AccessibilityService() {
 
     fun readScreen(): ScreenSnapshot? = resources.displayMetrics.let { ScreenReader.read(rootInActiveWindow, packageName, it.widthPixels, it.heightPixels) }
 
+    /** Texto copiado por el usuario y su marca de tiempo; null si no hay o Android no permite leerlo. */
+    fun clipboard(): Pair<String, Long>? = runCatching {
+        val clip = getSystemService(android.content.ClipboardManager::class.java)?.primaryClip ?: return null
+        val t = clip.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        t to clip.description.timestamp
+    }.getOrNull()
+
     suspend fun capture(): Bitmap? = suspendCancellableCoroutine { cont ->
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
             override fun onSuccess(shot: ScreenshotResult) {

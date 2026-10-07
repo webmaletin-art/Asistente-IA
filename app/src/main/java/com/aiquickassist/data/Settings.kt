@@ -78,6 +78,7 @@ object Settings {
     var showComplementary by bool("showComplementary", true)
 
     // Comportamiento
+    var useClipboard by bool("useClipboard", true)
     var detectHighlight by bool("detectHighlight", true)
     var quickAnswer by bool("quickAnswer", true)
     var showExplanation by bool("showExplanation", true)

@@ -112,6 +112,7 @@ fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
     Item("Modo discreto", if (Settings.discreet) "Sí" else "No", onClick = { nav.go("bubble") })
 
     Section("Comportamiento")
+    SwitchItem("Usar texto que copies a mano", Settings.useClipboard, "Si copias (Copiar) y tocas la burbuja en menos de 60 s, se usa ese texto. No se copia nada solo") { Settings.useClipboard = it }
     SwitchItem("Detectar selección por resaltado", Settings.detectHighlight, "Si el texto marcado no llega por accesibilidad, se localiza el resaltado en una captura y se lee con OCR") { Settings.detectHighlight = it }
     SwitchItem("Respuesta rápida", Settings.quickAnswer, "Mostrar la respuesta al terminar") { Settings.quickAnswer = it }
     SwitchItem("Mostrar explicación", Settings.showExplanation) { Settings.showExplanation = it }

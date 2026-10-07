@@ -221,7 +221,7 @@ class OverlayService : Service() {
         job = scope.launch {
             val snap = Bridge.readScreen()
             // Selección en vivo (evento) → selección del árbol → texto visible
-            val picked = Bridge.liveSelection() ?: snap?.selected ?: highlightSelection()
+            val picked = Bridge.liveSelection() ?: snap?.selected ?: freshClipboard() ?: highlightSelection()
             val parsed = picked?.let { QuestionParser.parseText(it) }
                 ?: snap?.let { QuestionParser.parse(it.lines, resources.displayMetrics.heightPixels / 2) }
             val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
@@ -241,6 +241,19 @@ class OverlayService : Service() {
      * solo esa zona con OCR local. Devuelve null si no hay resaltado.
      */
     private var lastHighlightInfo = ""
+    private var lastClipStamp = 0L
+
+    /**
+     * Opcional: texto que el usuario copió a mano hace menos de 60 s (y que aún no se usó).
+     * No se copia nada automáticamente; solo se lee lo que ya está en el portapapeles.
+     */
+    private fun freshClipboard(): String? {
+        if (!Settings.useClipboard) return null
+        val (text, stamp) = Bridge.clipboard() ?: return null
+        if (stamp <= lastClipStamp || System.currentTimeMillis() - stamp > 60_000L) return null
+        lastClipStamp = stamp
+        return text
+    }
 
     private suspend fun highlightSelection(): String? {
         lastHighlightInfo = ""
@@ -346,7 +359,7 @@ class OverlayService : Service() {
     private fun testStageText() {
         val r = testRun ?: return
         testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · paso 1: TEXTO",
-            "Marca con el dedo el texto de UNA pregunta (que quede el resaltado azul visible) y pulsa «Leer texto» sin tocar nada más.",
+            "Marca con el dedo el texto de UNA pregunta y pulsa «Leer texto» sin tocar nada más. (Para probar el portapapeles: marca, toca «Copiar» en Chrome y luego «Leer texto».)",
             listOf("Leer texto" to { testReadText() }, "Terminar" to { testFinish() }))
     }
 
@@ -357,27 +370,32 @@ class OverlayService : Service() {
             val t0 = System.currentTimeMillis()
             val live = Bridge.liveSelection()
             val snap = Bridge.readScreen()
-            val hi = if (live == null && snap?.selected == null) highlightSelection() else null
+            val clip = Bridge.clipboard()
+            val clipText = if (live == null && snap?.selected == null) freshClipboard() else null
+            val hi = if (live == null && snap?.selected == null && clipText == null) highlightSelection() else null
             val ms = System.currentTimeMillis() - t0
             val sb = r.sb
             sb.appendLine("──────── RONDA ${r.round} · TEXTO ────────")
             sb.appendLine("Lectura en $ms ms")
             sb.appendLine("Selección en vivo (evento): ${live?.let { "«${TestProbe.clip(it)}» (${it.length} car.)" } ?: "NINGUNA"}")
             sb.appendLine("Selección del árbol de accesibilidad: ${snap?.selected?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA"}")
+            sb.appendLine("Portapapeles (copiado a mano): ${if (clip == null) "NO LEGIBLE o vacío" else "«${TestProbe.clip(clip.first, 200)}» (hace ${(System.currentTimeMillis() - clip.second) / 1000} s)${if (clipText == null) " · no se usa (viejo o ya usado)" else " · SE USA"}"}")
             sb.appendLine("Selección por resaltado (captura + OCR): ${hi?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA (no se vio resaltado azul)"}")
             if (lastHighlightInfo.isNotEmpty()) sb.appendLine("   diagnóstico del resaltado: $lastHighlightInfo")
             sb.appendLine("Texto visible en pantalla: ${snap?.lines?.size ?: 0} líneas")
             snap?.lines?.take(12)?.forEachIndexed { i, l -> sb.appendLine("   ${i + 1}. ${if (l.option) "[opción] " else ""}${TestProbe.clip(l.text, 110)}") }
             val pLive = live?.let { QuestionParser.parseText(it) }
             val pNode = snap?.selected?.let { QuestionParser.parseText(it) }
+            val pClip = clipText?.let { QuestionParser.parseText(it) }
             val pHi = hi?.let { QuestionParser.parseText(it) }
+            sb.appendLine("Detección desde portapapeles: ${TestProbe.parsed(pClip)}")
             val pVis = snap?.let { QuestionParser.parse(it.lines, resources.displayMetrics.heightPixels / 2) }
             sb.appendLine("Detección desde resaltado: ${TestProbe.parsed(pHi)}")
             sb.appendLine("Detección desde selección en vivo: ${TestProbe.parsed(pLive)}")
             sb.appendLine("Detección desde selección del árbol: ${TestProbe.parsed(pNode)}")
             sb.appendLine("Detección desde texto visible: ${TestProbe.parsed(pVis)}")
-            r.textQ = pLive ?: pNode ?: pHi ?: pVis
-            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pHi != null) "resaltado (captura+OCR)" else if (pVis != null) "texto visible" else "ninguna"}")
+            r.textQ = pLive ?: pNode ?: pClip ?: pHi ?: pVis
+            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pClip != null) "portapapeles" else if (pHi != null) "resaltado (captura+OCR)" else if (pVis != null) "texto visible" else "ninguna"}")
             sb.appendLine()
             testStageOcr()
         }
