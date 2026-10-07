@@ -204,13 +204,14 @@ class OverlayService : Service() {
         if (tool == Tool.TEXT) runText() else startSelection(tool)
     }
 
-    /** Prioridad: selección del usuario (accesibilidad → botón «Copiar» → portapapeles) y, si no hay, texto visible. */
+    /** Prioridad: selección del usuario (botón «Copiar» → accesibilidad) y, si no hay, texto visible. */
     private fun runText() {
         job?.cancel()
         bubble.status = BubbleStatus.LOADING
         job = scope.launch {
             val snap = Bridge.readScreen()
-            val picked = snap?.selected ?: runCatching { Bridge.copySelection() }.getOrNull()
+            // «Copiar» copia lo seleccionado ahora mismo; la selección de accesibilidad de Chrome puede ir un paso atrasada
+            val picked = runCatching { Bridge.copySelection() }.getOrNull() ?: snap?.selected
             val parsed = picked?.let { QuestionParser.parseText(it) }
                 ?: snap?.let { QuestionParser.parse(it.lines) }
             val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
