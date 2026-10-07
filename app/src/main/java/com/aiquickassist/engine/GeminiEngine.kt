@@ -9,6 +9,45 @@ import java.io.ByteArrayOutputStream
 
 /** Cliente de Gemini (opcional). Usa la clave y la cuota del propio usuario. */
 object GeminiEngine {
+    @Volatile private var resolved: String? = null
+
+    /** Elige el mejor modelo disponible: versión más nueva, rápido (flash) antes que pro, estable antes que preview. */
+    fun pickModel(names: List<String>): String? {
+        val re = Regex("""^gemini-(\d+(?:\.\d+)?)-(flash-lite|flash|pro)(?:-(latest|\d{3}|preview.*))?$""")
+        val bad = listOf("tts", "image", "live", "audio", "embedding", "exp", "vision", "robotics", "computer", "thinking", "native")
+        return names.map { it.removePrefix("models/") }
+            .filter { n -> bad.none { n.contains(it) } }
+            .mapNotNull { n -> re.matchEntire(n)?.let { m ->
+                val tier = when (m.groupValues[2]) { "flash" -> 3; "flash-lite" -> 2; else -> 1 }
+                val stable = if (m.groupValues[3].startsWith("preview")) 0 else 1
+                Triple(n, m.groupValues[1].toDouble(), tier * 10 + stable)
+            } }
+            .sortedWith(compareByDescending<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
+            .firstOrNull()?.first
+    }
+
+    /** Consulta los modelos disponibles para la clave del usuario. */
+    suspend fun listModels(): List<String> {
+        val key = SecureStore.geminiKey() ?: return emptyList()
+        val j = JSONObject(Http.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", mapOf("x-goog-api-key" to key)))
+        val arr = j.optJSONArray("models") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { m -> (0 until (m.optJSONArray("supportedGenerationMethods")?.length() ?: 0)).any { m.getJSONArray("supportedGenerationMethods").getString(it) == "generateContent" } }
+            .map { it.getString("name") }
+    }
+
+    /** Modelo en uso: el elegido a mano o, en «auto», el mejor disponible (con respaldo si no se puede listar). */
+    suspend fun model(): String {
+        val m = Settings.geminiModel.trim()
+        if (m.isNotEmpty() && m != "auto") return m
+        resolved?.let { return it }
+        val picked = runCatching { pickModel(listModels()) }.getOrNull() ?: "gemini-flash-latest"
+        resolved = picked
+        return picked
+    }
+
+    fun resetModel() { resolved = null }
+
     fun available() = Settings.geminiEnabled && SecureStore.hasGeminiKey()
 
     suspend fun ask(p: ParsedQuestion, image: Bitmap? = null): Block {
@@ -46,13 +85,13 @@ object GeminiEngine {
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
             .put("generationConfig", JSONObject().put("temperature", 0.2).put("maxOutputTokens", 1024)
                 .put("responseMimeType", "application/json")).toString()
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/${Settings.geminiModel}:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent"
         val resp = try {
             Http.postJson(url, body, mapOf("x-goog-api-key" to key))
         } catch (e: HttpException) {
             throw AnalysisException(when (e.code) {
                 400, 401, 403 -> "Gemini rechazó la clave o la solicitud (${e.code}). Revisa la configuración."
-                404 -> "Modelo de Gemini no encontrado: ${Settings.geminiModel}."
+                404 -> { resolved = null; "Modelo de Gemini no encontrado. Se buscará otro en el próximo intento." }
                 429 -> "Se agotó la cuota de tu clave de Gemini. Inténtalo más tarde."
                 else -> "Error de Gemini (${e.code})."
             })

@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -182,6 +183,7 @@ fun GeminiScreen(nav: Nav) {
     var statusOk by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf(Settings.geminiModel) }
+    var usedModel by remember { mutableStateOf<String?>(null) }
 
     Screen("Gemini", nav::back) {
         SwitchItem("Usar Gemini", Settings.geminiEnabled) { Settings.geminiEnabled = it }
@@ -197,13 +199,20 @@ fun GeminiScreen(nav: Nav) {
             Spacer(Modifier.height(8.dp))
             WireButton("Guardar clave", enabled = key.isNotBlank()) {
                 SecureStore.saveGeminiKey(key); key = ""
+                GeminiEngine.resetModel()
                 configured = true; masked = SecureStore.maskedGeminiKey(); status = "Clave guardada de forma segura."; statusOk = true
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
+            val uri = androidx.compose.ui.platform.LocalUriHandler.current
+            WireButton("Obtener clave API (Google AI Studio)", Modifier.fillMaxWidth()) { uri.openUri("https://aistudio.google.com/apikey") }
+            Text("Documentación: ai.google.dev/gemini-api/docs", fontSize = 12.sp, color = C.blue,
+                modifier = Modifier.clickable { uri.openUri("https://ai.google.dev/gemini-api/docs") }.padding(vertical = 6.dp))
+            Spacer(Modifier.height(8.dp))
             OutlinedTextField(
-                value = model, onValueChange = { model = it; Settings.geminiModel = it.trim() }, singleLine = true,
-                modifier = Modifier.fillMaxWidth(), label = { Text("Modelo") }
+                value = model, onValueChange = { model = it; Settings.geminiModel = it.trim().ifEmpty { "auto" }; GeminiEngine.resetModel() }, singleLine = true,
+                modifier = Modifier.fillMaxWidth(), label = { Text("Modelo (auto = el mejor disponible)") }
             )
+            if (usedModel != null) Text("En uso: $usedModel", fontSize = 12.sp, color = C.sub, modifier = Modifier.padding(top = 4.dp))
         }
         Section("Estado")
         Text(
@@ -217,7 +226,9 @@ fun GeminiScreen(nav: Nav) {
                 busy = true; status = null
                 scope.launch {
                     val err = GeminiEngine.test()
-                    status = err ?: "Conectado"; statusOk = err == null; busy = false
+                    status = err ?: "Conectado"; statusOk = err == null
+                    if (err == null) usedModel = runCatching { GeminiEngine.model() }.getOrNull()
+                    busy = false
                 }
             }
             WireButton("Eliminar configuración", Modifier.fillMaxWidth(), enabled = configured) {

@@ -60,3 +60,13 @@ class GoogleFlowTest {
         assertEquals(1080, full[2] + full[0]); assertEquals(2160, full[3] + full[1])
     }
 }
+
+class GeminiModelTest {
+    @Test fun picksNewestFastStableModel() {
+        val names = listOf("models/gemini-1.5-pro", "models/gemini-2.5-flash", "models/gemini-2.5-pro", "models/gemini-3.0-pro-preview",
+            "models/gemini-2.5-flash-image", "models/gemini-2.5-flash-preview-tts", "models/embedding-001", "models/gemini-3.0-flash")
+        assertEquals("gemini-3.0-flash", com.aiquickassist.engine.GeminiEngine.pickModel(names))
+        assertEquals("gemini-2.5-flash", com.aiquickassist.engine.GeminiEngine.pickModel(names.filter { !it.contains("3.0") }))
+        assertNull(com.aiquickassist.engine.GeminiEngine.pickModel(listOf("models/embedding-001")))
+    }
+}

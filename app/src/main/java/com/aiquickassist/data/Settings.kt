@@ -62,7 +62,7 @@ object Settings {
     // Motor
     var engineMode by enum("engineMode", EngineMode.OVERVIEW)
     var geminiEnabled by bool("geminiEnabled", true)
-    var geminiModel by str("geminiModel", "gemini-2.5-flash")
+    var geminiModel by str("geminiModel", "auto")
     var defaultTool by enum("defaultTool", Tool.TEXT)
 
     // Google AI Mode
