@@ -112,6 +112,7 @@ fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
     Item("Modo discreto", if (Settings.discreet) "Sí" else "No", onClick = { nav.go("bubble") })
 
     Section("Comportamiento")
+    SwitchItem("Detectar selección por resaltado", Settings.detectHighlight, "Si el texto marcado no llega por accesibilidad, se localiza el resaltado en una captura y se lee con OCR") { Settings.detectHighlight = it }
     SwitchItem("Respuesta rápida", Settings.quickAnswer, "Mostrar la respuesta al terminar") { Settings.quickAnswer = it }
     SwitchItem("Mostrar explicación", Settings.showExplanation) { Settings.showExplanation = it }
     SwitchItem("Mostrar fuentes", Settings.showSources) { Settings.showSources = it }
@@ -264,19 +265,27 @@ fun PermissionsScreen(nav: Nav) {
         PermRow("Mostrar sobre otras apps", "Necesario para dibujar la burbuja flotante.", overlay) {
             ctx.startActivity(Intent(AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
         }
-        PermRow("Accesibilidad", "Permite leer el texto visible y capturar la pantalla solo cuando tocas la burbuja.", access) {
-            ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
-        }
         PermRow("Notificaciones", "Muestra el aviso de la burbuja activa (con Ocultar / Detener).", notif) {
             if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        // Va ANTES de Accesibilidad: Android solo muestra «Permitir configuración restringida» tras un primer intento
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Configuración restringida", fontSize = 16.sp)
-            Text("Si Android no te deja activar Accesibilidad (app instalada fuera de Play Store): abre «Información de la app», toca ⋮ arriba a la derecha → «Permitir configuración restringida» y vuelve a activar Accesibilidad.",
-                fontSize = 13.sp, color = C.sub, modifier = Modifier.padding(vertical = 4.dp))
-            WireButton("Abrir información de la app") {
-                ctx.startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+            Row { Text("Configuración restringida", fontSize = 16.sp, modifier = Modifier.weight(1f)); Text(if (access) "no hace falta" else "paso previo", fontSize = 13.sp, color = C.sub) }
+            Text("Si al activar Accesibilidad Android dice «configuración restringida»:\n" +
+                "1. Pulsa «Intentar activar Accesibilidad» (saldrá el aviso y entonces aparece el menú ⋮).\n" +
+                "2. Pulsa «Abrir información de la app», toca ⋮ arriba a la derecha → «Permitir configuración restringida».\n" +
+                "3. Vuelve aquí y activa Accesibilidad.",
+                fontSize = 13.sp, color = C.sub, modifier = Modifier.padding(vertical = 6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WireButton("1. Intentar activar") { ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                WireButton("2. Info de la app") {
+                    ctx.startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+                }
             }
+        }
+        HorizontalDivider(color = C.line)
+        PermRow("Accesibilidad", "Permite leer el texto visible y capturar la pantalla solo cuando tocas la burbuja.", access) {
+            ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         HorizontalDivider(color = C.line)
         Text(

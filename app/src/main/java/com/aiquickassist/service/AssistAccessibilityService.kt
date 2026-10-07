@@ -39,7 +39,7 @@ class AssistAccessibilityService : AccessibilityService() {
     /** Última selección de texto vista (se descarta a los 10 min o si se deseleccionó). */
     fun liveSelection(): String? = selection?.takeIf { System.currentTimeMillis() - selectionAt < 10 * 60_000L }
 
-    fun readScreen(): ScreenSnapshot? = ScreenReader.read(rootInActiveWindow, packageName)
+    fun readScreen(): ScreenSnapshot? = resources.displayMetrics.let { ScreenReader.read(rootInActiveWindow, packageName, it.widthPixels, it.heightPixels) }
 
     suspend fun capture(): Bitmap? = suspendCancellableCoroutine { cont ->
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {

@@ -10,15 +10,19 @@ object ScreenReader {
     private const val MAX_NODES = 4000
     private const val MAX_CHARS = 14000
 
-    fun read(root: AccessibilityNodeInfo?, ownPackage: String): ScreenSnapshot? {
+    fun read(root: AccessibilityNodeInfo?, ownPackage: String, screenW: Int = 0, screenH: Int = 0): ScreenSnapshot? {
         if (root == null || root.packageName == ownPackage) return null
         val lines = mutableListOf<ScreenLine>()
         var selected: String? = null
         var nodes = 0
         var chars = 0
 
+        val r = android.graphics.Rect()
         fun visit(n: AccessibilityNodeInfo, optionParent: Boolean) {
             if (nodes++ > MAX_NODES || chars > MAX_CHARS || !n.isVisibleToUser) return
+            n.getBoundsInScreen(r)
+            // Chrome marca como visibles nodos fuera de pantalla: se descartan los que no cruzan la pantalla
+            if (screenH > 0 && (r.bottom <= 0 || r.top >= screenH || r.right <= 0 || r.left >= screenW)) return
             val cls = n.className?.toString().orEmpty()
             val isOpt = n.isCheckable || cls.endsWith("RadioButton") || cls.endsWith("CheckBox")
             val text = n.text?.toString()
@@ -29,7 +33,7 @@ object ScreenReader {
             val label = text?.takeIf { it.isNotBlank() }
                 ?: n.contentDescription?.toString()?.takeIf { it.isNotBlank() && n.childCount == 0 }
             if (label != null && !(n.isEditable && cls.endsWith("EditText"))) {
-                lines += ScreenLine(label, isOpt || optionParent)
+                lines += ScreenLine(label, isOpt || optionParent, r.top)
                 chars += label.length
             }
             for (i in 0 until n.childCount) n.getChild(i)?.let { visit(it, isOpt && label == null) }

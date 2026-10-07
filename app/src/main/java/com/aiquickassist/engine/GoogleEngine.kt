@@ -53,13 +53,19 @@ object GoogleEngine {
         try {
             load(web, url)
             t("cargada: ${web.url}")
+            var retried = false
             repeat(16) { n ->
                 val r = evalJson(web, OVERVIEW_JS)
                 t("lectura #${n + 1}: estado=${r.optString("s").ifEmpty { "(vacío)" }} texto=${r.optString("text").length} car.")
                 when (r.optString("s")) {
-                    "blocked", "consent" -> throw AnalysisException(
-                        "Google pide verificación o consentimiento. Ábrelo para continuar.",
-                        googleUrl = url, openLabel = "Ver resultados de Google")
+                    "blocked", "consent" -> {
+                        if (n == 0 && !retried) {                       // a veces la primera carga sin cookies pide verificación
+                            retried = true; t("verificación en el primer intento: se reintenta una vez")
+                            delay(1200); load(web, url); t("recargada: ${web.url}")
+                        } else throw AnalysisException(
+                            "Google pide verificación o consentimiento. Ábrelo para continuar.",
+                            googleUrl = url, openLabel = "Ver resultados de Google")
+                    }
                     "ok" -> GoogleText.cleanOverview(r.optString("text"))?.let { text ->
                         val links = r.optJSONArray("links")
                         val sources = (0 until (links?.length() ?: 0)).mapNotNull {

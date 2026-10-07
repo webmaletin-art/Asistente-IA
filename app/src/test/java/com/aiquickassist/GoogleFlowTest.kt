@@ -96,3 +96,29 @@ class ParserWidgetTest {
         assertTrue(t.startsWith("La naturaleza es"))
     }
 }
+
+class HighlightTest {
+    private fun fill(px: IntArray, w: Int, x0: Int, y0: Int, x1: Int, y1: Int, c: Int) { for (y in y0 until y1) for (x in x0 until x1) px[y * w + x] = c }
+
+    @Test fun findsTheSelectedBlockAndIgnoresHandles() {
+        val w = 400; val h = 600
+        val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        val blue = 0xFFB3D7F7.toInt()                      // resaltado
+        fill(px, w, 40, 200, 340, 232, blue)               // línea 1
+        fill(px, w, 40, 236, 180, 268, blue)               // línea 2 (interlineado de 4 px)
+        fill(px, w, 30, 272, 60, 300, 0xFFAEC8FA.toInt())  // «manija» pequeña (no cuenta)
+        fill(px, w, 10, 500, 380, 505, blue)               // franja demasiado fina
+        val b = com.aiquickassist.capture.HighlightDetector.find(px, w, h)!!
+        assertEquals(40, b[0]); assertEquals(200, b[1]); assertEquals(300, b[2]); assertEquals(68, b[3])
+        assertNull(com.aiquickassist.capture.HighlightDetector.find(IntArray(w * h) { 0xFFFFFFFF.toInt() }, w, h))
+    }
+
+    @Test fun parserPrefersQuestionNearFocus() {
+        val lines = listOf(
+            com.aiquickassist.engine.ScreenLine("1. ¿Cuál es el animal más pequeño?", false, 200),
+            com.aiquickassist.engine.ScreenLine("2. ¿Con qué animal compartimos más ADN?", false, 1200),
+            com.aiquickassist.engine.ScreenLine("3. ¿Cuál es el único mamífero que vuela?", false, 2200)
+        )
+        assertEquals("¿Con qué animal compartimos más ADN?", QuestionParser.parse(lines, 1150)!!.question.removePrefix("2. "))
+    }
+}

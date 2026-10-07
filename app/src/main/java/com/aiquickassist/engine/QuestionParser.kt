@@ -5,7 +5,7 @@ import com.aiquickassist.data.ParsedQuestion
 import com.aiquickassist.data.QType
 
 /** Línea de texto de pantalla; [option] = el origen la marca como opción (radio/checkbox). */
-data class ScreenLine(val text: String, val option: Boolean = false)
+data class ScreenLine(val text: String, val option: Boolean = false, val top: Int = -1)
 
 /** Detecta pregunta, tipo y opciones a partir de texto crudo. */
 object QuestionParser {
@@ -39,12 +39,13 @@ object QuestionParser {
         }
     }
 
-    fun parse(input: List<ScreenLine>): ParsedQuestion? {
-        val lines = input.map { ScreenLine(it.text.replace(Regex("\\s+"), " ").trim(), it.option) }
+    /** [focusY]: si se conoce (centro de pantalla), entre varias preguntas se elige la más cercana. */
+    fun parse(input: List<ScreenLine>, focusY: Int = -1): ParsedQuestion? {
+        val lines = input.map { it.copy(text = it.text.replace(Regex("\\s+"), " ").trim()) }
             .filter { it.text.isNotBlank() && !noise.matches(it.text) && !(it.text.length < 2 && !it.option) }
         if (lines.isEmpty()) return null
 
-        val group = findOptionGroups(lines).maxByOrNull { score(lines, it) }?.takeIf { score(lines, it) > 0 }
+        val group = findOptionGroups(lines).maxByOrNull { score(lines, it, focusY) }?.takeIf { score(lines, it, focusY) > 0 }
         if (group != null) {
             val (start, end, opts) = group
             val (q, ctx) = questionBefore(lines, start)
@@ -56,8 +57,13 @@ object QuestionParser {
         val joined = all.joinToString("\n")
         val question: String
         var ctx = ""
-        if (joined.length <= 400) {
+        val cands = all.indices.filter { all[it].contains('?') || all[it].contains('¿') }
+        val useFocus = focusY >= 0 && cands.size > 1 && lines.any { it.top >= 0 }
+        if (joined.length <= 400 && !useFocus) {
             question = all.joinToString(" ")
+        } else if (useFocus) {
+            val qi = cands.minByOrNull { Math.abs(lines[it].top - focusY) }!!
+            question = all[qi].take(400)
         } else {
             val qi = all.indexOfFirst { it.contains('?') || it.contains('¿') }
             if (qi >= 0) {
@@ -76,13 +82,15 @@ object QuestionParser {
     private val widgetNoise = Regex("""presiona|intro|calificaci|rating|estrella|votos|[uú]til|gracias|compartir|publicidad""", RegexOption.IGNORE_CASE)
 
     /** Puntúa un grupo de opciones: prefiere pregunta con «?» y opciones reales; penaliza widgets (calificación, etc.). */
-    private fun score(lines: List<ScreenLine>, g: Group): Double {
+    private fun score(lines: List<ScreenLine>, g: Group, focusY: Int = -1): Double {
         val q = questionBefore(lines, g.start).first
         var sc = 1.0
         if (q.contains('?')) sc += 4
         sc += minOf(q.length, 120) / 40.0
         sc += g.options.map { it.text.split(' ').size }.average().coerceAtMost(6.0) / 3
         if (g.options.any { widgetNoise.containsMatchIn(it.text) } || widgetNoise.containsMatchIn(q)) sc -= 8
+        val top = lines[g.start].top
+        if (focusY >= 0 && top >= 0) sc -= minOf(Math.abs(top - focusY) / 400.0, 3.0)
         return sc
     }
 

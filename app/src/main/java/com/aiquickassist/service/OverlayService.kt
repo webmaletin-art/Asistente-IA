@@ -25,6 +25,7 @@ import androidx.core.app.ServiceCompat
 import com.aiquickassist.MainActivity
 import com.aiquickassist.R
 import com.aiquickassist.capture.CropStore
+import com.aiquickassist.capture.HighlightDetector
 import com.aiquickassist.capture.Ocr
 import com.aiquickassist.data.*
 import com.aiquickassist.engine.*
@@ -220,9 +221,9 @@ class OverlayService : Service() {
         job = scope.launch {
             val snap = Bridge.readScreen()
             // Selección en vivo (evento) → selección del árbol → texto visible
-            val picked = Bridge.liveSelection() ?: snap?.selected
+            val picked = Bridge.liveSelection() ?: snap?.selected ?: highlightSelection()
             val parsed = picked?.let { QuestionParser.parseText(it) }
-                ?: snap?.let { QuestionParser.parse(it.lines) }
+                ?: snap?.let { QuestionParser.parse(it.lines, resources.displayMetrics.heightPixels / 2) }
             val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
             if (parsed == null || size < 8) {
                 bubble.status = BubbleStatus.IDLE
@@ -233,6 +234,26 @@ class OverlayService : Service() {
             bubble.status = if (ok) BubbleStatus.DONE else BubbleStatus.ERROR
             showPanel = !ok || Settings.quickAnswer
         }
+    }
+
+    /**
+     * Chrome no entrega la selección por accesibilidad: se localiza el resaltado azul en una captura y se lee
+     * solo esa zona con OCR local. Devuelve null si no hay resaltado.
+     */
+    private suspend fun highlightSelection(): String? {
+        if (!Settings.detectHighlight) return null
+        bubble.visibility = View.INVISIBLE
+        delay(150)
+        val shot = Bridge.capture()
+        if (!hidden) bubble.visibility = View.VISIBLE
+        shot ?: return null
+        val w = shot.width; val h = shot.height
+        val px = IntArray(w * h); shot.getPixels(px, 0, w, 0, 0, w, h)
+        val box = HighlightDetector.find(px, w, h) ?: return null
+        val pad = 6
+        val x = (box[0] - pad).coerceAtLeast(0); val y = (box[1] - pad).coerceAtLeast(0)
+        val crop = Bitmap.createBitmap(shot, x, y, (box[2] + 2 * pad).coerceAtMost(w - x), (box[3] + 2 * pad).coerceAtMost(h - y))
+        return runCatching { Ocr.read(crop) }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
     private fun launchAnalysis(block: suspend () -> AnalysisResult) {
@@ -331,22 +352,26 @@ class OverlayService : Service() {
             val t0 = System.currentTimeMillis()
             val live = Bridge.liveSelection()
             val snap = Bridge.readScreen()
+            val hi = if (live == null && snap?.selected == null) highlightSelection() else null
             val ms = System.currentTimeMillis() - t0
             val sb = r.sb
             sb.appendLine("──────── RONDA ${r.round} · TEXTO ────────")
             sb.appendLine("Lectura en $ms ms")
             sb.appendLine("Selección en vivo (evento): ${live?.let { "«${TestProbe.clip(it)}» (${it.length} car.)" } ?: "NINGUNA"}")
             sb.appendLine("Selección del árbol de accesibilidad: ${snap?.selected?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA"}")
-            sb.appendLine("Texto visible: ${snap?.lines?.size ?: 0} líneas")
+            sb.appendLine("Selección por resaltado (captura + OCR): ${hi?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA (no se vio resaltado azul)"}")
+            sb.appendLine("Texto visible en pantalla: ${snap?.lines?.size ?: 0} líneas")
             snap?.lines?.take(12)?.forEachIndexed { i, l -> sb.appendLine("   ${i + 1}. ${if (l.option) "[opción] " else ""}${TestProbe.clip(l.text, 110)}") }
             val pLive = live?.let { QuestionParser.parseText(it) }
             val pNode = snap?.selected?.let { QuestionParser.parseText(it) }
-            val pVis = snap?.let { QuestionParser.parse(it.lines) }
+            val pHi = hi?.let { QuestionParser.parseText(it) }
+            val pVis = snap?.let { QuestionParser.parse(it.lines, resources.displayMetrics.heightPixels / 2) }
+            sb.appendLine("Detección desde resaltado: ${TestProbe.parsed(pHi)}")
             sb.appendLine("Detección desde selección en vivo: ${TestProbe.parsed(pLive)}")
             sb.appendLine("Detección desde selección del árbol: ${TestProbe.parsed(pNode)}")
             sb.appendLine("Detección desde texto visible: ${TestProbe.parsed(pVis)}")
-            r.textQ = pLive ?: pNode ?: pVis
-            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pVis != null) "texto visible" else "ninguna"}")
+            r.textQ = pLive ?: pNode ?: pHi ?: pVis
+            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pHi != null) "resaltado (captura+OCR)" else if (pVis != null) "texto visible" else "ninguna"}")
             sb.appendLine()
             testStageOcr()
         }
