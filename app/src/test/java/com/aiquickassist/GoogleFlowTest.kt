@@ -122,3 +122,21 @@ class HighlightTest {
         assertEquals("¿Con qué animal compartimos más ADN?", QuestionParser.parse(lines, 1150)!!.question.removePrefix("2. "))
     }
 }
+
+class CleanupTest {
+    @Test fun formulaLettersAreMergedAndLeadIsFirstParagraph() {
+        val raw = "El perímetro de este rectángulo es 24.\nFórmula:\nP\ne\nr\nm\n=\n2\nPor lo tanto es 24 y esa es la opción correcta de las que hay."
+        val t = GoogleText.cleanAiMode(raw, "")!!
+        assertFalse(t.lines().any { it.length == 1 })
+        assertEquals("El perímetro de este rectángulo es 24.", GoogleText.lead(t))
+    }
+
+    @Test fun darkHighlightIsFound() {
+        val w = 300; val h = 400
+        val px = IntArray(w * h) { 0xFF101010.toInt() }
+        for (y in 100 until 130) for (x in 30 until 250) px[y * w + x] = 0xFF2F5A94.toInt()
+        val b = com.aiquickassist.capture.HighlightDetector.findAny(px, w, h)!!
+        assertEquals(30, b[0]); assertEquals(100, b[1]); assertEquals(220, b[2])
+        assertTrue(com.aiquickassist.capture.HighlightDetector.stats(px).contains("azul oscuro="))
+    }
+}

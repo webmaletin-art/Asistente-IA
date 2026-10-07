@@ -72,7 +72,7 @@ object GoogleEngine {
                             links!!.optJSONObject(it)?.let { o -> Source(o.optString("t").ifBlank { o.optString("u") }, o.optString("u")) }
                         }.distinctBy { it.url }.take(5)
                         return@withContext GoogleAnswer(
-                            Block(Origin.GOOGLE_AI_OVERVIEW, answer = TextUtil.firstSentences(text, 450),
+                            Block(Origin.GOOGLE_AI_OVERVIEW, answer = GoogleText.lead(text, 450),
                                 explanation = text, sources = sources, confidence = 0.8), url)
                     }
                 }
@@ -133,7 +133,7 @@ object GoogleEngine {
                 if (text != null) {
                     if (text == last) stable++ else { stable = 0; last = text }
                     if (stable >= 3) return@withContext GoogleAnswer(
-                        Block(Origin.GOOGLE_AI_MODE, answer = TextUtil.firstSentences(text, 360), explanation = text, confidence = 0.75), url)
+                        Block(Origin.GOOGLE_AI_MODE, answer = GoogleText.lead(text, 450), explanation = text, confidence = 0.75), url)
                 }
             }
             throw fail("No se pudo obtener una respuesta confiable de Google.")

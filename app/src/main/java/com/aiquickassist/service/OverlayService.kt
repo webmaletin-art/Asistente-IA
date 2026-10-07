@@ -240,7 +240,10 @@ class OverlayService : Service() {
      * Chrome no entrega la selección por accesibilidad: se localiza el resaltado azul en una captura y se lee
      * solo esa zona con OCR local. Devuelve null si no hay resaltado.
      */
+    private var lastHighlightInfo = ""
+
     private suspend fun highlightSelection(): String? {
+        lastHighlightInfo = ""
         if (!Settings.detectHighlight) return null
         bubble.visibility = View.INVISIBLE
         delay(150)
@@ -249,7 +252,9 @@ class OverlayService : Service() {
         shot ?: return null
         val w = shot.width; val h = shot.height
         val px = IntArray(w * h); shot.getPixels(px, 0, w, 0, 0, w, h)
-        val box = HighlightDetector.find(px, w, h) ?: return null
+        lastHighlightInfo = HighlightDetector.stats(px) + " · pantalla ${w}×$h"
+        val box = HighlightDetector.findAny(px, w, h) ?: return null
+        lastHighlightInfo += " · bloque ${box[2]}×${box[3]} en (${box[0]},${box[1]})"
         val pad = 6
         val x = (box[0] - pad).coerceAtLeast(0); val y = (box[1] - pad).coerceAtLeast(0)
         val crop = Bitmap.createBitmap(shot, x, y, (box[2] + 2 * pad).coerceAtMost(w - x), (box[3] + 2 * pad).coerceAtMost(h - y))
@@ -341,7 +346,7 @@ class OverlayService : Service() {
     private fun testStageText() {
         val r = testRun ?: return
         testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · paso 1: TEXTO",
-            "Selecciona con el dedo el texto de una pregunta en la pantalla (como lo harías normalmente) y pulsa «Leer texto». No copies nada.",
+            "Marca con el dedo el texto de UNA pregunta (que quede el resaltado azul visible) y pulsa «Leer texto» sin tocar nada más.",
             listOf("Leer texto" to { testReadText() }, "Terminar" to { testFinish() }))
     }
 
@@ -360,6 +365,7 @@ class OverlayService : Service() {
             sb.appendLine("Selección en vivo (evento): ${live?.let { "«${TestProbe.clip(it)}» (${it.length} car.)" } ?: "NINGUNA"}")
             sb.appendLine("Selección del árbol de accesibilidad: ${snap?.selected?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA"}")
             sb.appendLine("Selección por resaltado (captura + OCR): ${hi?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA (no se vio resaltado azul)"}")
+            if (lastHighlightInfo.isNotEmpty()) sb.appendLine("   diagnóstico del resaltado: $lastHighlightInfo")
             sb.appendLine("Texto visible en pantalla: ${snap?.lines?.size ?: 0} líneas")
             snap?.lines?.take(12)?.forEachIndexed { i, l -> sb.appendLine("   ${i + 1}. ${if (l.option) "[opción] " else ""}${TestProbe.clip(l.text, 110)}") }
             val pLive = live?.let { QuestionParser.parseText(it) }
