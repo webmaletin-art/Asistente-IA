@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AI Quick Assist</string>
+    <string name="accessibility_description">Lee el texto visible en pantalla y captura la pantalla solo cuando tocas la burbuja, para analizar preguntas. No se procesa nada en segundo plano.</string>
+</resources>
