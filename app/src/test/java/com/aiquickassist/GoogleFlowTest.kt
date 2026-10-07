@@ -78,3 +78,21 @@ class GeminiModelTest {
         assertEquals(listOf("gemini-3.0-flash", "gemini-3.0-pro-preview", "gemini-2.5-flash"), com.aiquickassist.engine.GeminiEngine.rankModels(names).take(3))
     }
 }
+
+class ParserWidgetTest {
+    @Test fun ratingWidgetIsNotTheQuestion() {
+        val p = QuestionParser.parseText(
+            "¿Cuál es la capital de Francia?\nA. Madrid\nB. París\nC. Roma\n" +
+                "sección de calificación de la respuesta\nA. No me ayuda presiona Intro para enviar esta calificación\n" +
+                "B. Está mal presiona Intro para enviar esta calificación\nC. Buena presiona Intro para enviar esta calificación")!!
+        assertEquals("¿Cuál es la capital de Francia?", p.question)
+        assertEquals("París", p.options[1].text)
+    }
+
+    @Test fun aiModeHeaderIsRemoved() {
+        val raw = "Conversación en el Modo IA: ¿Qué es la naturaleza?\nEnviaste 1 imagen y dijiste ¿Qué es la naturaleza?\nLa naturaleza es el conjunto de todo lo que existe en el universo físico y material."
+        val t = GoogleText.cleanAiMode(raw, "¿Qué es la naturaleza?")!!
+        assertFalse(t.contains("Enviaste")); assertFalse(t.contains("Conversación"))
+        assertTrue(t.startsWith("La naturaleza es"))
+    }
+}

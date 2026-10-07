@@ -34,6 +34,12 @@ object GoogleEngine {
 
     fun init(c: Context) { app = c.applicationContext }
 
+    /** Diagnóstico de la última operación (lo usa el Modo test). */
+    val trace = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private var t0 = 0L
+    private fun resetTrace() { trace.clear(); t0 = System.currentTimeMillis() }
+    private fun t(msg: String) { trace += "+${System.currentTimeMillis() - t0} ms  $msg" }
+
     /** Recorte listo para el selector de archivos de Google (navegador o sesión interna). Vigente 15 min. */
     fun currentUpload(): Uri? = upload?.takeIf { System.currentTimeMillis() - uploadAt < 15 * 60_000L }
     fun clearUpload() { upload = null }
@@ -42,11 +48,14 @@ object GoogleEngine {
     // ---------------------------------------------------------------- Visión general
     suspend fun overview(query: String): GoogleAnswer = withContext(Dispatchers.Main) {
         val url = GoogleText.searchUrl(query)
+        resetTrace(); t("Visión general: consulta «$query»")
         val web = newWebView()
         try {
             load(web, url)
-            repeat(16) {
+            t("cargada: ${web.url}")
+            repeat(16) { n ->
                 val r = evalJson(web, OVERVIEW_JS)
+                t("lectura #${n + 1}: estado=${r.optString("s").ifEmpty { "(vacío)" }} texto=${r.optString("text").length} car.")
                 when (r.optString("s")) {
                     "blocked", "consent" -> throw AnalysisException(
                         "Google pide verificación o consentimiento. Ábrelo para continuar.",
@@ -73,6 +82,7 @@ object GoogleEngine {
     // ---------------------------------------------------------------- AI Mode (texto o imagen real)
     suspend fun aiMode(query: String, image: Uri?): GoogleAnswer = withContext(Dispatchers.Main) {
         val url = GoogleText.aiModeUrl(query)
+        resetTrace(); t("AI Mode: consulta «$query» imagen=${image != null}")
         val fail = { msg: String ->
             if (image != null) armUpload(image)       // el navegador ofrecerá este recorte en el selector de Google
             AnalysisException(msg, googleUrl = if (image != null) GoogleText.aiModeUrl("") else url, openLabel = "Abrir Google AI Mode")
@@ -83,9 +93,11 @@ object GoogleEngine {
                 armUpload(image)
                 chooserHits = 0
                 load(web, GoogleText.aiModeUrl(""))
+                t("cargada: ${web.url}")
                 delay(1500)
                 for (attempt in 0 until 3) {
                     val r = evalJson(web, uploadFindJs(attempt))
+                    t("botón adjuntar intento ${attempt + 1}: ${r.optString("s")} «${r.optString("l")}» (${r.optDouble("x", -1.0).toInt()},${r.optDouble("y", -1.0).toInt()})")
                     when (r.optString("s")) {
                         "blocked", "consent" -> throw fail("Google pide verificación o inicio de sesión para usar AI Mode.")
                         "found" -> tap(web, r.optDouble("x").toFloat(), r.optDouble("y").toFloat())
@@ -94,12 +106,15 @@ object GoogleEngine {
                     while (chooserHits == 0 && waited < 2500) { delay(250); waited += 250 }
                     if (chooserHits > 0) break
                 }
+                t("selector de archivos solicitado: ${chooserHits} vez/veces")
                 if (chooserHits == 0) throw fail("No se pudo enviar la imagen a Google AI Mode automáticamente.")
                 delay(3000)                                   // Google procesa la imagen adjunta
                 val s = evalString(web, submitJs(query))
+                t("enviar: $s")
                 if (s == "nobox") throw fail("No se encontró el cuadro de AI Mode.")
             } else {
                 load(web, url)
+                t("cargada: ${web.url}")
             }
             var last = ""; var stable = 0
             repeat(50) {
@@ -108,6 +123,7 @@ object GoogleEngine {
                 if (r.optString("s") == "blocked" || r.optString("s") == "consent")
                     throw fail("Google pide verificación o inicio de sesión para usar AI Mode.")
                 val text = GoogleText.cleanAiMode(r.optString("text"), query)
+                t("respuesta: bruto=${r.optString("text").length} limpio=${text?.length ?: 0} estable=$stable")
                 if (text != null) {
                     if (text == last) stable++ else { stable = 0; last = text }
                     if (stable >= 3) return@withContext GoogleAnswer(

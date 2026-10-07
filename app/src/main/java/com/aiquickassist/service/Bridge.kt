@@ -18,6 +18,6 @@ object Bridge {
     }
 
     fun readScreen(): ScreenSnapshot? = accessibility?.readScreen()
-    suspend fun copySelection(): String? = accessibility?.copySelection()
+    fun liveSelection(): String? = accessibility?.liveSelection()
     suspend fun capture(): Bitmap? = accessibility?.capture()
 }

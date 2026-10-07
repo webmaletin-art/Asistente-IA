@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
                     "web" -> WebEngineScreen(nav)
                     "gemini" -> GeminiScreen(nav)
                     "googleai" -> GoogleAiScreen(nav)
+                    "testreport" -> TestReportScreen(nav)
                     "bubble" -> BubbleSettingsScreen(nav)
                     "history" -> HistoryScreen(nav)
                     "permissions" -> PermissionsScreen(nav)

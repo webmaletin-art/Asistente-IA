@@ -44,7 +44,7 @@ object QuestionParser {
             .filter { it.text.isNotBlank() && !noise.matches(it.text) && !(it.text.length < 2 && !it.option) }
         if (lines.isEmpty()) return null
 
-        val group = findOptionGroup(lines)
+        val group = findOptionGroups(lines).maxByOrNull { score(lines, it) }?.takeIf { score(lines, it) > 0 }
         if (group != null) {
             val (start, end, opts) = group
             val (q, ctx) = questionBefore(lines, start)
@@ -73,7 +73,21 @@ object QuestionParser {
 
     private data class Group(val start: Int, val end: Int, val options: List<Option>)
 
-    private fun findOptionGroup(lines: List<ScreenLine>): Group? {
+    private val widgetNoise = Regex("""presiona|intro|calificaci|rating|estrella|votos|[uú]til|gracias|compartir|publicidad""", RegexOption.IGNORE_CASE)
+
+    /** Puntúa un grupo de opciones: prefiere pregunta con «?» y opciones reales; penaliza widgets (calificación, etc.). */
+    private fun score(lines: List<ScreenLine>, g: Group): Double {
+        val q = questionBefore(lines, g.start).first
+        var sc = 1.0
+        if (q.contains('?')) sc += 4
+        sc += minOf(q.length, 120) / 40.0
+        sc += g.options.map { it.text.split(' ').size }.average().coerceAtMost(6.0) / 3
+        if (g.options.any { widgetNoise.containsMatchIn(it.text) } || widgetNoise.containsMatchIn(q)) sc -= 8
+        return sc
+    }
+
+    private fun findOptionGroups(lines: List<ScreenLine>): List<Group> {
+        val out = mutableListOf<Group>()
         // 1) Opciones con letra A, B, C... consecutivas
         var i = 0
         while (i < lines.size) {
@@ -86,12 +100,12 @@ object QuestionParser {
                     val mj = letterOpt.matchEntire(lines[j].text)
                     if (mj != null && mj.groupValues[1].uppercase()[0] == next) {
                         opts += Option(next.toString(), mj.groupValues[2].trim()); next++; j++
-                    } else if (mj == null && lines[j].text.firstOrNull()?.isLowerCase() == true && lines[j].text.length < 120) {
+                    } else if (mj == null && lines[j].text.firstOrNull()?.isLowerCase() == true && lines[j].text.length < 120 && !widgetNoise.containsMatchIn(lines[j].text)) {
                         val last = opts.removeAt(opts.lastIndex)       // línea envuelta
                         opts += last.copy(text = last.text + " " + lines[j].text); j++
                     } else break
                 }
-                if (opts.size >= 2) return Group(i, j, opts)
+                if (opts.size >= 2) out += Group(i, j, opts)
                 i = j
             } else i++
         }
@@ -102,15 +116,14 @@ object QuestionParser {
                 var j = i
                 while (j < lines.size && lines[j].option) j++
                 if (j - i >= 2) {
-                    val opts = (i until j).take(8).mapIndexed { k, idx ->
+                    out += Group(i, j, (i until j).take(8).mapIndexed { k, idx ->
                         Option(('A' + k).toString(), lines[idx].text.replace(letterOpt, "$2"))
-                    }
-                    return Group(i, j, opts)
+                    })
                 }
                 i = j
             } else i++
         }
-        return null
+        return out
     }
 
     private fun questionBefore(lines: List<ScreenLine>, start: Int): Pair<String, String> {

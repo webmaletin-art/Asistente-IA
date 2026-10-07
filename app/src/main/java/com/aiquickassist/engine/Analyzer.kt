@@ -37,9 +37,15 @@ object Analyzer {
                 AnalysisResult(p, mode, g, gemini = g, withImage = image != null)
             }
             EngineMode.BOTH -> both(p, image)
-            else -> {
+            else -> try {
                 val (g, url, note) = google(p, image, mode)
                 AnalysisResult(p, mode, g, google = g, googleUrl = url, note = note, withImage = image != null)
+            } catch (e: AnalysisException) {
+                // Respaldo opcional: si Google no responde y Gemini está configurado, responde Gemini (se etiqueta como Gemini)
+                if (!Settings.geminiFallback || !GeminiEngine.available()) throw e
+                val g = runCatching { GeminiEngine.ask(p.copy(hasImage = image != null), image?.bitmap) }.getOrNull() ?: throw e
+                AnalysisResult(p, mode, g, gemini = g, googleUrl = e.googleUrl,
+                    note = "Google no respondió (${e.message}); esta respuesta es de Gemini.", withImage = image != null)
             }
         }
         if (image == null) synchronized(cache) { cache[key] = r }

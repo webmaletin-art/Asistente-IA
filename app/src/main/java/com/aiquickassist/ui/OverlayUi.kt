@@ -23,7 +23,7 @@ import com.aiquickassist.data.Tool
 
 enum class MenuAction(val label: String, val glyph: String) {
     TEXT("Texto", "T"), OCR("OCR", "▣"), IMAGE("Imagen", "□"),
-    SEARCH("Buscar", "🔍"), BROWSER("Navegador", "◉"), SETTINGS("Configuración", "⚙")
+    SEARCH("Buscar", "🔍"), BROWSER("Navegador", "◉"), TEST("Modo test", "✔"), SETTINGS("Configuración", "⚙")
 }
 
 /** Menú vertical de herramientas junto a la burbuja (se abre con presión larga). */
@@ -41,6 +41,18 @@ fun BubbleMenu(current: Tool, searchEnabled: Boolean, x: Dp, y: Dp, onSelect: (M
                     }
                 }
             }
+        }
+    }
+}
+
+/** Guía del Modo test: texto del paso actual y sus botones, sobre la app que se esté usando. */
+@Composable
+fun TestBanner(ui: com.aiquickassist.service.TestUi) {
+    Column(Modifier.fillMaxWidth().padding(8.dp).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.bg, RoundedCornerShape(6.dp)).padding(12.dp)) {
+        Text(ui.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.blue)
+        if (ui.text.isNotBlank()) Text(ui.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+        Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            ui.buttons.forEach { (label, action) -> WireButton(label, onClick = action) }
         }
     }
 }

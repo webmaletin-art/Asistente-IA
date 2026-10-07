@@ -49,7 +49,12 @@ object GoogleText {
     /** Respuesta de AI Mode; se descarta el eco de la consulta y la interfaz. */
     fun cleanAiMode(raw: String, query: String): String? {
         val q = query.trim()
-        val t = lines(raw) { it.equals(q, true) }.joinToString("\n")
+        val prefix = Regex("""^(conversaci[oó]n en el modo ia|conversation in ai mode)\s*:?\s*""", RegexOption.IGNORE_CASE)
+        val sent = Regex("""enviaste \d+ im[aá]gen(?:es)?( y dijiste:?)?|you sent \d+ images?( and said:?)?""", RegexOption.IGNORE_CASE)
+        val t = lines(raw) { false }
+            .map { it.replace(prefix, "").replace(sent, "").trim() }
+            .filter { it.isNotEmpty() && !it.equals(q, true) && !(q.length > 8 && it.startsWith(q, true) && it.length < q.length + 12) }
+            .joinToString("\n")
         return t.takeIf { it.length >= 60 }
     }
 }

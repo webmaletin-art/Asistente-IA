@@ -18,43 +18,28 @@ class AssistAccessibilityService : AccessibilityService() {
     override fun onUnbind(intent: android.content.Intent?): Boolean { Bridge.accessibility = null; return super.onUnbind(intent) }
     override fun onInterrupt() {}
 
+    @Volatile private var selection: String? = null
+    @Volatile private var selectionAt = 0L
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED && event.packageName != packageName) Bridge.onScroll?.invoke()
-    }
-
-    fun readScreen(): ScreenSnapshot? = ScreenReader.read(rootInActiveWindow, packageName)
-
-    /**
-     * Si el usuario tiene texto seleccionado (barra «Copiar / Seleccionar todo» visible), pulsa «Copiar»
-     * mediante accesibilidad, lee el portapapeles y lo restaura. Devuelve null si no hay selección o no se pudo.
-     */
-    suspend fun copySelection(): String? {
-        val cm = getSystemService(android.content.ClipboardManager::class.java) ?: return null
-        val before = runCatching { cm.primaryClip }.getOrNull()
-        val beforeText = before?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
-        val beforeTime = before?.description?.timestamp ?: 0L
-        var clicked = false
-        loop@ for (w in windows) {
-            val root = w.root ?: continue
-            for (label in listOf("Copiar", "Copy")) {
-                for (n in root.findAccessibilityNodeInfosByText(label)) {
-                    if (n.text?.toString()?.trim().equals(label, true)) {
-                        var t: android.view.accessibility.AccessibilityNodeInfo? = n
-                        while (t != null && !t.isClickable) t = t.parent
-                        if (t?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true) { clicked = true; break@loop }
-                    }
-                }
+        event ?: return
+        if (event.packageName == packageName) return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> Bridge.onScroll?.invoke()
+            // Evento en vivo: llega al marcar el texto, sin el retraso del árbol de accesibilidad
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                val text = event.source?.text?.toString() ?: event.text?.joinToString("")
+                val from = event.fromIndex; val to = event.toIndex
+                selection = if (text != null && from >= 0 && to > from && to <= text.length) text.substring(from, to).takeIf { it.isNotBlank() } else null
+                selectionAt = System.currentTimeMillis()
             }
         }
-        if (!clicked) return null
-        kotlinx.coroutines.delay(220)
-        val after = runCatching { cm.primaryClip }.getOrNull() ?: return null
-        val afterText = after.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
-        val changed = after.description.timestamp > beforeTime || afterText != beforeText
-        if (!changed || afterText.isNullOrBlank()) return null
-        if (beforeText != null) runCatching { cm.setPrimaryClip(android.content.ClipData.newPlainText("", beforeText)) }
-        return afterText
     }
+
+    /** Última selección de texto vista (se descarta a los 10 min o si se deseleccionó). */
+    fun liveSelection(): String? = selection?.takeIf { System.currentTimeMillis() - selectionAt < 10 * 60_000L }
+
+    fun readScreen(): ScreenSnapshot? = ScreenReader.read(rootInActiveWindow, packageName)
 
     suspend fun capture(): Bitmap? = suspendCancellableCoroutine { cont ->
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {

@@ -62,6 +62,7 @@ object Settings {
     // Motor
     var engineMode by enum("engineMode", EngineMode.OVERVIEW)
     var geminiEnabled by bool("geminiEnabled", true)
+    var geminiFallback by bool("geminiFallback", true)
     var geminiModel by str("geminiModel", "auto")
     var defaultTool by enum("defaultTool", Tool.TEXT)
 

@@ -28,6 +28,7 @@ import com.aiquickassist.capture.CropStore
 import com.aiquickassist.capture.Ocr
 import com.aiquickassist.data.*
 import com.aiquickassist.engine.*
+import com.aiquickassist.engine.GoogleText
 import com.aiquickassist.ui.*
 import kotlinx.coroutines.*
 
@@ -36,11 +37,12 @@ class OverlayService : Service() {
     companion object {
         const val ACTION_STOP = "stop"
         const val ACTION_TOGGLE_HIDE = "toggle_hide"
+        const val ACTION_TEST = "test"
         private const val CHANNEL = "bubble"
         @Volatile var running = false
 
-        fun start(ctx: Context) {
-            ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
+        fun start(ctx: Context, action: String? = null) {
+            ctx.startForegroundService(Intent(ctx, OverlayService::class.java).setAction(action))
         }
         fun stop(ctx: Context) { ctx.stopService(Intent(ctx, OverlayService::class.java)) }
     }
@@ -50,6 +52,10 @@ class OverlayService : Service() {
     private lateinit var owner: ServiceLifecycleOwner
     private val state = AssistState()
     private var showPanel by mutableStateOf(false)
+    private var testUi by mutableStateOf<TestUi?>(null)
+    private var testView: View? = null
+    private var testRun: TestRun? = null
+    private var testHook: ((Bitmap, String) -> Unit)? = null
 
     private lateinit var bubble: BubbleView
     private lateinit var bubbleLp: WindowManager.LayoutParams
@@ -77,12 +83,14 @@ class OverlayService : Service() {
         Bridge.onScroll = { onScroll() }
         scope.launch { snapshotFlow { Settings.bubbleConfig() }.collect { applyConfig(it) } }
         scope.launch { snapshotFlow { Triple(showPanel, state.panel, state.searchOpen) }.collect { syncPanel() } }
+        scope.launch { snapshotFlow { testUi }.collect { syncTestBanner() } }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { Settings.bubbleEnabled = false; stopSelf() }
             ACTION_TOGGLE_HIDE -> if (::bubble.isInitialized) setHidden(!hidden)
+            ACTION_TEST -> if (::bubble.isInitialized) startTest()
         }
         return START_STICKY
     }
@@ -92,7 +100,7 @@ class OverlayService : Service() {
         Bridge.onScroll = null
         if (::owner.isInitialized) {
             job?.cancel(); scope.cancel()
-            listOf(menuView, panelView, selectionView).forEach { remove(it) }
+            listOf(menuView, panelView, selectionView, testView).forEach { remove(it) }
             if (::bubble.isInitialized) remove(bubble)
             owner.destroy()
         }
@@ -159,7 +167,7 @@ class OverlayService : Service() {
     private fun openMenu() {
         if (menuView != null) return
         val dm = resources.displayMetrics
-        val menuW = px(190); val menuH = px(6 * 48 + 8)
+        val menuW = px(190); val menuH = px(7 * 48 + 8)
         val size = bubbleLp.width
         val left = if (bubbleLp.x + size / 2 < dm.widthPixels / 2) bubbleLp.x + size else bubbleLp.x - menuW
         val top = minOf(bubbleLp.y, dm.heightPixels - menuH - px(24)).coerceAtLeast(px(24))
@@ -183,6 +191,7 @@ class OverlayService : Service() {
             MenuAction.IMAGE -> { Settings.defaultTool = Tool.IMAGE; runTool(Tool.IMAGE) }
             MenuAction.SEARCH -> { showPanel = true; state.searchText = ""; state.searchOpen = true }
             MenuAction.BROWSER -> openApp("browser")
+            MenuAction.TEST -> startTest()
             MenuAction.SETTINGS -> openApp("settings")
         }
     }
@@ -204,14 +213,14 @@ class OverlayService : Service() {
         if (tool == Tool.TEXT) runText() else startSelection(tool)
     }
 
-    /** Prioridad: selección del usuario (botón «Copiar» → accesibilidad) y, si no hay, texto visible. */
+    /** Prioridad: selección en vivo → selección del árbol → texto visible y, si no hay, texto visible. */
     private fun runText() {
         job?.cancel()
         bubble.status = BubbleStatus.LOADING
         job = scope.launch {
             val snap = Bridge.readScreen()
-            // «Copiar» copia lo seleccionado ahora mismo; la selección de accesibilidad de Chrome puede ir un paso atrasada
-            val picked = runCatching { Bridge.copySelection() }.getOrNull() ?: snap?.selected
+            // Selección en vivo (evento) → selección del árbol → texto visible
+            val picked = Bridge.liveSelection() ?: snap?.selected
             val parsed = picked?.let { QuestionParser.parseText(it) }
                 ?: snap?.let { QuestionParser.parse(it.lines) }
             val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
@@ -241,9 +250,11 @@ class OverlayService : Service() {
         job?.cancel()
         job = scope.launch {
             bubble.visibility = View.INVISIBLE
+            testView?.visibility = View.INVISIBLE
             delay(180)
             val shot = Bridge.capture()
             if (!hidden) bubble.visibility = View.VISIBLE
+            testView?.visibility = View.VISIBLE
             if (shot == null) { toast("No se pudo capturar la pantalla"); return@launch }
             showSelection(shot, tool)
         }
@@ -253,7 +264,8 @@ class OverlayService : Service() {
         remove(selectionView)
         val v = SelectionView(this, shot, askQuestion = tool == Tool.IMAGE, onCancel = { remove(selectionView); selectionView = null }, onAnalyze = { crop, q ->
             remove(selectionView); selectionView = null
-            launchAnalysis { analyzeCrop(crop, tool, q) }
+            val hook = testHook
+            if (hook != null) { testHook = null; hook(crop, q) } else launchAnalysis { analyzeCrop(crop, tool, q) }
         })
         selectionView = v
         val lp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
@@ -285,6 +297,159 @@ class OverlayService : Service() {
             else -> ParsedQuestion(QType.OPEN, "", context = text.take(1500), hasImage = true)
         }
         return Analyzer.analyze(p, image)
+    }
+
+    // ---------------- Modo test guiado ----------------
+    private class TestRun {
+        val sb = StringBuilder()
+        var round = 1
+        var textQ: ParsedQuestion? = null
+        var ocrQ: ParsedQuestion? = null
+        val rounds = 3
+    }
+
+    private fun startTest() {
+        resetIdle()
+        if (Bridge.accessibility == null) { toast("Activa primero el servicio de accesibilidad"); openApp("permissions"); return }
+        val r = TestRun()
+        r.sb.appendLine("=== INFORME DE TEST · AI Quick Assist ===").append(TestProbe.env(this)).appendLine()
+        testRun = r
+        testStageText()
+    }
+
+    private fun testStageText() {
+        val r = testRun ?: return
+        testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · paso 1: TEXTO",
+            "Selecciona con el dedo el texto de una pregunta en la pantalla (como lo harías normalmente) y pulsa «Leer texto». No copies nada.",
+            listOf("Leer texto" to { testReadText() }, "Terminar" to { testFinish() }))
+    }
+
+    private fun testReadText() {
+        val r = testRun ?: return
+        testUi = TestUi("Leyendo…", "Comprobando qué ve la app en la pantalla.", emptyList())
+        scope.launch {
+            val t0 = System.currentTimeMillis()
+            val live = Bridge.liveSelection()
+            val snap = Bridge.readScreen()
+            val ms = System.currentTimeMillis() - t0
+            val sb = r.sb
+            sb.appendLine("──────── RONDA ${r.round} · TEXTO ────────")
+            sb.appendLine("Lectura en $ms ms")
+            sb.appendLine("Selección en vivo (evento): ${live?.let { "«${TestProbe.clip(it)}» (${it.length} car.)" } ?: "NINGUNA"}")
+            sb.appendLine("Selección del árbol de accesibilidad: ${snap?.selected?.let { "«${TestProbe.clip(it)}»" } ?: "NINGUNA"}")
+            sb.appendLine("Texto visible: ${snap?.lines?.size ?: 0} líneas")
+            snap?.lines?.take(12)?.forEachIndexed { i, l -> sb.appendLine("   ${i + 1}. ${if (l.option) "[opción] " else ""}${TestProbe.clip(l.text, 110)}") }
+            val pLive = live?.let { QuestionParser.parseText(it) }
+            val pNode = snap?.selected?.let { QuestionParser.parseText(it) }
+            val pVis = snap?.let { QuestionParser.parse(it.lines) }
+            sb.appendLine("Detección desde selección en vivo: ${TestProbe.parsed(pLive)}")
+            sb.appendLine("Detección desde selección del árbol: ${TestProbe.parsed(pNode)}")
+            sb.appendLine("Detección desde texto visible: ${TestProbe.parsed(pVis)}")
+            r.textQ = pLive ?: pNode ?: pVis
+            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pVis != null) "texto visible" else "ninguna"}")
+            sb.appendLine()
+            testStageOcr()
+        }
+    }
+
+    private fun testStageOcr() {
+        val r = testRun ?: return
+        testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · paso 2: OCR (captura)",
+            "Pulsa «Captura», marca con el rectángulo esa misma pregunta y toca «Analizar».",
+            listOf("Captura" to { testHook = ::testOnOcr; startSelection(Tool.OCR) }, "Saltar" to { testRunEngines() }, "Terminar" to { testFinish() }))
+    }
+
+    private fun testOnOcr(crop: Bitmap, @Suppress("UNUSED_PARAMETER") q: String) {
+        val r = testRun ?: return
+        testUi = TestUi("Procesando OCR…", "", emptyList())
+        scope.launch {
+            val t0 = System.currentTimeMillis()
+            val text = runCatching { Ocr.read(crop) }.getOrElse { "(error OCR: ${it.message})" }
+            val sb = r.sb
+            sb.appendLine("──────── RONDA ${r.round} · OCR ────────")
+            sb.appendLine("Recorte: ${crop.width}×${crop.height} px · OCR en ${System.currentTimeMillis() - t0} ms")
+            sb.appendLine("Texto OCR (${text.length} car.): «${TestProbe.clip(text, 700)}»")
+            r.ocrQ = QuestionParser.parseText(text, ocr = true)
+            sb.appendLine("Detección desde OCR: ${TestProbe.parsed(r.ocrQ)}")
+            sb.appendLine()
+            testRunEngines()
+        }
+    }
+
+    private fun testRunEngines() {
+        val r = testRun ?: return
+        val q = r.textQ ?: r.ocrQ
+        testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · ejecutando motores",
+            "Probando Visión general, AI Mode y Gemini con la misma pregunta. Puede tardar hasta un minuto.", emptyList())
+        scope.launch {
+            val sb = r.sb
+            sb.appendLine("──────── RONDA ${r.round} · MOTORES ────────")
+            if (q == null) sb.appendLine("Sin pregunta detectada: no se probaron motores.")
+            else {
+                sb.appendLine("Consulta enviada a Google: «${GoogleText.query(q)}»")
+                sb.appendLine(TestProbe.probe("Visión general de Google", true) { GoogleEngine.overview(GoogleText.query(q)).block })
+                sb.appendLine(TestProbe.probe("Google AI Mode (texto)", true) { GoogleEngine.aiMode(GoogleText.query(q), null).block })
+                sb.appendLine(TestProbe.probe("Gemini (texto)", false) { GeminiEngine.ask(q) })
+                val oq = r.ocrQ
+                if (oq != null && r.textQ != null && GoogleText.query(oq) != GoogleText.query(q)) {
+                    sb.appendLine("La pregunta del OCR difiere de la de texto: «${GoogleText.query(oq)}»")
+                    sb.appendLine(TestProbe.probe("Visión general (consulta del OCR)", true) { GoogleEngine.overview(GoogleText.query(oq)).block })
+                }
+            }
+            sb.appendLine()
+            r.round++; r.textQ = null; r.ocrQ = null
+            if (r.round > r.rounds) testStageImage() else testStageText()
+        }
+    }
+
+    private fun testStageImage() {
+        testUi = TestUi("Test · paso final: IMAGEN",
+            "Pulsa «Captura imagen», marca un objeto o una pregunta, escribe una pregunta si quieres y toca «Enviar imagen».",
+            listOf("Captura imagen" to { testHook = ::testOnImage; startSelection(Tool.IMAGE) }, "Saltar" to { testFinish() }, "Terminar" to { testFinish() }))
+    }
+
+    private fun testOnImage(crop: Bitmap, question: String) {
+        val r = testRun ?: return
+        testUi = TestUi("Test · imagen", "Enviando el recorte a Google AI Mode y a Gemini. Puede tardar hasta un minuto.", emptyList())
+        scope.launch {
+            val sb = r.sb
+            val uri = CropStore.save(this@OverlayService, crop)
+            val bytes = runCatching { contentResolver.openInputStream(uri)?.use { it.readBytes().size } }.getOrNull()
+            sb.appendLine("──────── IMAGEN ────────")
+            sb.appendLine("Recorte: ${crop.width}×${crop.height} px · archivo ${bytes ?: "?"} bytes · $uri")
+            sb.appendLine("Pregunta escrita: ${question.ifBlank { "(ninguna)" }}")
+            val ocr = runCatching { Ocr.read(crop) }.getOrDefault("")
+            sb.appendLine("OCR de apoyo: «${TestProbe.clip(ocr, 300)}»")
+            val p = if (question.isNotBlank()) ParsedQuestion(QType.OPEN, question, context = ocr.take(1500), hasImage = true)
+            else ParsedQuestion(QType.OPEN, "", context = ocr.take(1500), hasImage = true)
+            sb.appendLine(TestProbe.probe("Google AI Mode (imagen)", true) { GoogleEngine.aiMode(question, uri).block })
+            sb.appendLine(TestProbe.probe("Gemini (imagen)", false) { GeminiEngine.ask(p, crop) })
+            sb.appendLine()
+            testFinish()
+        }
+    }
+
+    private fun testFinish() {
+        val r = testRun ?: return
+        r.sb.appendLine("=== FIN DEL INFORME ===")
+        TestReport.save(this, r.sb.toString())
+        testRun = null; testHook = null; testUi = null
+        openApp("testreport")
+    }
+
+    private fun syncTestBanner() {
+        val ui = testUi
+        if (ui == null) { remove(testView); testView = null; return }
+        if (testView != null) return
+        val v = owner.compose(this) {
+            AppTheme { testUi?.let { TestBanner(it) } }
+        }
+        testView = v
+        val lp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+        lp.y = px(56)
+        wm.addView(v, lp)
     }
 
     // ---------------- Panel de respuesta / búsqueda ----------------

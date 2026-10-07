@@ -74,6 +74,11 @@ fun HomeScreen(nav: Nav) {
                 Settings.bubbleEnabled = true; OverlayService.start(ctx)
             }
         }
+        Spacer(Modifier.height(8.dp))
+        WireButton("Modo test (informe de diagnóstico)", Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            if (!canOverlay || Bridge.accessibility == null) nav.go("permissions")
+            else { Settings.bubbleEnabled = true; OverlayService.start(ctx, OverlayService.ACTION_TEST) }
+        }
         Section("Estado")
         Item("Burbuja", if (Settings.bubbleEnabled && canOverlay) "● Activa" else "○ Inactiva")
         Item("Motor", Settings.engineMode.label)
@@ -187,6 +192,8 @@ fun GeminiScreen(nav: Nav) {
 
     Screen("Gemini", nav::back) {
         SwitchItem("Usar Gemini", Settings.geminiEnabled) { Settings.geminiEnabled = it }
+        SwitchItem("Usar Gemini si Google no responde", Settings.geminiFallback,
+            "Con «Visión general» o «AI Mode», Gemini responde solo cuando Google falla (se etiqueta como Gemini)") { Settings.geminiFallback = it }
         Section("Configuración")
         Column(Modifier.padding(horizontal = 16.dp)) {
             if (configured) Text("Clave guardada: $masked", fontSize = 14.sp, color = C.sub, modifier = Modifier.padding(bottom = 8.dp))
@@ -263,6 +270,15 @@ fun PermissionsScreen(nav: Nav) {
         PermRow("Notificaciones", "Muestra el aviso de la burbuja activa (con Ocultar / Detener).", notif) {
             if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Configuración restringida", fontSize = 16.sp)
+            Text("Si Android no te deja activar Accesibilidad (app instalada fuera de Play Store): abre «Información de la app», toca ⋮ arriba a la derecha → «Permitir configuración restringida» y vuelve a activar Accesibilidad.",
+                fontSize = 13.sp, color = C.sub, modifier = Modifier.padding(vertical = 4.dp))
+            WireButton("Abrir información de la app") {
+                ctx.startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+            }
+        }
+        HorizontalDivider(color = C.line)
         Text(
             "La captura de pantalla se realiza con la función oficial del servicio de accesibilidad, sin grabación continua. " +
                 "Android puede pedirte confirmar el servicio en Ajustes.",
@@ -344,5 +360,29 @@ fun HistoryScreen(nav: Nav) {
             confirmButton = { TextButton(onClick = { HistoryStore.remove(h.id); open = null }) { Text("Borrar", color = C.err) } },
             dismissButton = { TextButton(onClick = { open = null }) { Text("Cerrar", color = androidx.compose.ui.graphics.Color.Black) } }
         )
+    }
+}
+
+// ---------------------------------------------------------------- Informe del Modo test
+@Composable
+fun TestReportScreen(nav: Nav) {
+    val ctx = LocalContext.current
+    val report = com.aiquickassist.service.TestReport.text
+    Screen("Informe de test", nav::back) {
+        if (report.isBlank()) Text("Aún no hay informe. Inicia el Modo test desde la pantalla principal o el menú de la burbuja.", color = C.sub, modifier = Modifier.padding(16.dp))
+        else {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WireButton("Copiar informe") {
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Informe", report))
+                    android.widget.Toast.makeText(ctx, "Informe copiado", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                WireButton("Compartir") {
+                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, report), "Compartir informe")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
+            Text(report, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(horizontal = 12.dp))
+        }
     }
 }
