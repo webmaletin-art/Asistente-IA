@@ -204,15 +204,25 @@ class OverlayService : Service() {
         if (tool == Tool.TEXT) runText() else startSelection(tool)
     }
 
+    /** Prioridad: selección del usuario (accesibilidad → botón «Copiar» → portapapeles) y, si no hay, texto visible. */
     private fun runText() {
-        val snap = Bridge.readScreen()
-        val parsed = snap?.let { s -> s.selected?.let { QuestionParser.parseText(it) } ?: QuestionParser.parse(s.lines) }
-        val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
-        if (parsed == null || size < 8) {
-            toast("No hay texto disponible: usando OCR")
-            startSelection(Tool.OCR); return
+        job?.cancel()
+        bubble.status = BubbleStatus.LOADING
+        job = scope.launch {
+            val snap = Bridge.readScreen()
+            val picked = snap?.selected ?: runCatching { Bridge.copySelection() }.getOrNull()
+            val parsed = picked?.let { QuestionParser.parseText(it) }
+                ?: snap?.let { QuestionParser.parse(it.lines) }
+            val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
+            if (parsed == null || size < 8) {
+                bubble.status = BubbleStatus.IDLE
+                toast("No hay texto disponible: usando OCR")
+                startSelection(Tool.OCR); return@launch
+            }
+            val ok = state.run { Analyzer.analyze(parsed) }
+            bubble.status = if (ok) BubbleStatus.DONE else BubbleStatus.ERROR
+            showPanel = !ok || Settings.quickAnswer
         }
-        launchAnalysis { Analyzer.analyze(parsed) }
     }
 
     private fun launchAnalysis(block: suspend () -> AnalysisResult) {

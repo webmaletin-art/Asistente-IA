@@ -159,6 +159,11 @@ fun BrowserScreen(nav: Nav) {
             }
             TextButton(onClick = { tabs.add(BrowserTab(nextId++)); current = tabs.lastIndex }) { Text("+", fontSize = 18.sp, color = Color.Black) }
         }
+        var armed by remember(tab.url) { mutableStateOf(com.aiquickassist.engine.GoogleEngine.currentUpload() != null) }
+        if (armed && tab.url.contains("google.")) Row(Modifier.fillMaxWidth().background(C.surface).padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Recorte listo: pulsa «Subir imagen» en Google y se enviará tu selección.", fontSize = 12.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { com.aiquickassist.engine.GoogleEngine.clearUpload(); armed = false }) { Text("Quitar", fontSize = 12.sp, color = Color.Black) }
+        }
         if (tab.progress < 100) LinearProgressIndicator(progress = { tab.progress / 100f }, Modifier.fillMaxWidth(), color = Color.Black, trackColor = C.line)
         else HorizontalDivider(color = C.line)
 

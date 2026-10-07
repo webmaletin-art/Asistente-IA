@@ -12,7 +12,9 @@ object GeminiEngine {
     @Volatile private var resolved: String? = null
 
     /** Elige el mejor modelo disponible: versión más nueva, rápido (flash) antes que pro, estable antes que preview. */
-    fun pickModel(names: List<String>): String? {
+    fun pickModel(names: List<String>): String? = rankModels(names).firstOrNull()
+
+    fun rankModels(names: List<String>): List<String> {
         val re = Regex("""^gemini-(\d+(?:\.\d+)?)-(flash-lite|flash|pro)(?:-(latest|\d{3}|preview.*))?$""")
         val bad = listOf("tts", "image", "live", "audio", "embedding", "exp", "vision", "robotics", "computer", "thinking", "native")
         return names.map { it.removePrefix("models/") }
@@ -23,7 +25,7 @@ object GeminiEngine {
                 Triple(n, m.groupValues[1].toDouble(), tier * 10 + stable)
             } }
             .sortedWith(compareByDescending<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
-            .firstOrNull()?.first
+            .map { it.first }
     }
 
     /** Consulta los modelos disponibles para la clave del usuario. */
@@ -36,17 +38,22 @@ object GeminiEngine {
             .map { it.getString("name") }
     }
 
-    /** Modelo en uso: el elegido a mano o, en «auto», el mejor disponible (con respaldo si no se puede listar). */
-    suspend fun model(): String {
+    @Volatile private var ranked: List<String>? = null
+
+    /** Modelos a probar, en orden: el elegido a mano o, en «auto», los mejores disponibles. */
+    private suspend fun candidates(): List<String> {
         val m = Settings.geminiModel.trim()
-        if (m.isNotEmpty() && m != "auto") return m
-        resolved?.let { return it }
-        val picked = runCatching { pickModel(listModels()) }.getOrNull() ?: "gemini-flash-latest"
-        resolved = picked
-        return picked
+        if (m.isNotEmpty() && m != "auto") return listOf(m)
+        ranked?.let { return it }
+        val list = runCatching { rankModels(listModels()).take(4) }.getOrNull().orEmpty().ifEmpty { listOf("gemini-flash-latest") }
+        ranked = list
+        return list
     }
 
-    fun resetModel() { resolved = null }
+    /** Modelo en uso (el primero de la lista). */
+    suspend fun model(): String = resolved ?: candidates().first()
+
+    fun resetModel() { resolved = null; ranked = null }
 
     fun available() = Settings.geminiEnabled && SecureStore.hasGeminiKey()
 
@@ -85,22 +92,34 @@ object GeminiEngine {
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
             .put("generationConfig", JSONObject().put("temperature", 0.2).put("maxOutputTokens", 1024)
                 .put("responseMimeType", "application/json")).toString()
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent"
-        val resp = try {
-            Http.postJson(url, body, mapOf("x-goog-api-key" to key))
-        } catch (e: HttpException) {
-            throw AnalysisException(when (e.code) {
-                400, 401, 403 -> "Gemini rechazó la clave o la solicitud (${e.code}). Revisa la configuración."
-                404 -> { resolved = null; "Modelo de Gemini no encontrado. Se buscará otro en el próximo intento." }
-                429 -> "Se agotó la cuota de tu clave de Gemini. Inténtalo más tarde."
-                else -> "Error de Gemini (${e.code})."
-            })
-        } catch (e: java.io.IOException) {
-            throw AnalysisException("Sin conexión con Gemini.")
+        var last: AnalysisException? = null
+        for (model in candidates()) {
+            // 503/500: saturación temporal → un reintento corto y luego el siguiente modelo. 429 (cuota) no se esquiva.
+            for (attempt in 0..1) {
+                try {
+                    val resp = Http.postJson("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent", body, mapOf("x-goog-api-key" to key))
+                    resolved = model
+                    return JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
+                        ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
+                        ?: throw AnalysisException("Gemini no devolvió respuesta.")
+                } catch (e: HttpException) {
+                    when (e.code) {
+                        400, 401, 403 -> throw AnalysisException("Gemini rechazó la clave o la solicitud (${e.code}). Revisa la configuración.")
+                        429 -> throw AnalysisException("Se agotó la cuota de tu clave de Gemini. Inténtalo más tarde.")
+                        404 -> { last = AnalysisException("Modelo de Gemini no encontrado: $model."); break }
+                        500, 502, 503, 504 -> {
+                            last = AnalysisException("Gemini está saturado (${e.code}). Es temporal: vuelve a intentarlo en unos segundos.")
+                            if (attempt == 0) kotlinx.coroutines.delay(1200)
+                        }
+                        else -> throw AnalysisException("Error de Gemini (${e.code}).")
+                    }
+                } catch (e: java.io.IOException) {
+                    throw AnalysisException("Sin conexión con Gemini.")
+                }
+            }
         }
-        return JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
-            ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
-            ?: throw AnalysisException("Gemini no devolvió respuesta.")
+        ranked = null
+        throw last ?: AnalysisException("Gemini no respondió.")
     }
 
     private fun parse(raw: String, p: ParsedQuestion): Block {

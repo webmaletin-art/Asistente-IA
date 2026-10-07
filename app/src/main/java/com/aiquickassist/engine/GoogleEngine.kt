@@ -36,6 +36,7 @@ object GoogleEngine {
 
     /** Recorte listo para el selector de archivos de Google (navegador o sesión interna). Vigente 15 min. */
     fun currentUpload(): Uri? = upload?.takeIf { System.currentTimeMillis() - uploadAt < 15 * 60_000L }
+    fun clearUpload() { upload = null }
     fun armUpload(uri: Uri) { upload = uri; uploadAt = System.currentTimeMillis() }
 
     // ---------------------------------------------------------------- Visión general
@@ -56,7 +57,7 @@ object GoogleEngine {
                             links!!.optJSONObject(it)?.let { o -> Source(o.optString("t").ifBlank { o.optString("u") }, o.optString("u")) }
                         }.distinctBy { it.url }.take(5)
                         return@withContext GoogleAnswer(
-                            Block(Origin.GOOGLE_AI_OVERVIEW, answer = TextUtil.firstSentences(text, 320),
+                            Block(Origin.GOOGLE_AI_OVERVIEW, answer = TextUtil.firstSentences(text, 450),
                                 explanation = text, sources = sources, confidence = 0.8), url)
                     }
                 }
@@ -83,17 +84,15 @@ object GoogleEngine {
                 chooserHits = 0
                 load(web, GoogleText.aiModeUrl(""))
                 delay(1500)
-                var clicked = false
                 for (attempt in 0 until 3) {
-                    val r = evalJson(web, uploadClickJs(attempt))
+                    val r = evalJson(web, uploadFindJs(attempt))
                     when (r.optString("s")) {
                         "blocked", "consent" -> throw fail("Google pide verificación o inicio de sesión para usar AI Mode.")
-                        "clicked" -> clicked = true
+                        "found" -> tap(web, r.optDouble("x").toFloat(), r.optDouble("y").toFloat())
                     }
                     var waited = 0
                     while (chooserHits == 0 && waited < 2500) { delay(250); waited += 250 }
                     if (chooserHits > 0) break
-                    if (!clicked && attempt == 2) break
                 }
                 if (chooserHits == 0) throw fail("No se pudo enviar la imagen a Google AI Mode automáticamente.")
                 delay(3000)                                   // Google procesa la imagen adjunta
@@ -179,6 +178,7 @@ object GoogleEngine {
       if(!head) return JSON.stringify({s:'none'});
       var box=head, base=(head.innerText||'').length;
       for(var k=0;k<7&&box.parentElement;k++){ box=box.parentElement; if((box.innerText||'').length>base+120) break; }
+      [].slice.call(box.querySelectorAll('style,script,noscript,template')).forEach(function(n){n.style.setProperty('display','none','important');});
       var t=(box.innerText||''); if(t.length>5000) return JSON.stringify({s:'none'});
       var links=[].slice.call(box.querySelectorAll('a[href]')).filter(function(a){return /^https?:/.test(a.href)&&a.hostname.indexOf('google.')<0;})
         .slice(0,8).map(function(a){return {t:(a.innerText||a.getAttribute('aria-label')||'').trim().slice(0,80),u:a.href};});
@@ -188,15 +188,24 @@ object GoogleEngine {
       var m=document.querySelector('[role=main]')||document.body;
       return JSON.stringify({s:'ok',text:m.innerText||''});})()"""
 
-    private fun uploadClickJs(attempt: Int): String {
+    /** Devuelve el centro (px de pantalla) del control de adjuntar imagen; el toque real lo da Kotlin. */
+    private fun uploadFindJs(attempt: Int): String {
         val re = if (attempt == 0) "(subir|cargar|adjuntar|a[ñn]adir|agregar|imagen|foto|upload|attach|add image|image|photo|lens)"
         else "(subir|upload|archivo|file|galer[ií]a|gallery|dispositivo|device|imagen|image)"
         return """(function(){ $GUARD
-          var re=/$re/i, els=[].slice.call(document.querySelectorAll('button,[role=button],[role=menuitem],div[aria-label],span[aria-label]'));
-          for(var i=0;i<els.length;i++){var l=(els[i].getAttribute('aria-label')||els[i].innerText||'').trim();
-            if(l.length>0&&l.length<60&&re.test(l)){els[i].click();return JSON.stringify({s:'clicked',l:l});}}
-          var f=document.querySelector('input[type=file]'); if(f){f.click();return JSON.stringify({s:'clicked',l:'input'});}
+          var re=/$re/i, els=[].slice.call(document.querySelectorAll('button,[role=button],[role=menuitem],div[aria-label],span[aria-label],label'));
+          for(var i=0;i<els.length;i++){var e=els[i],l=(e.getAttribute('aria-label')||e.innerText||'').trim();
+            if(l.length>0&&l.length<60&&re.test(l)){var r=e.getBoundingClientRect(); if(r.width>0&&r.height>0){
+              var d=window.devicePixelRatio||1; return JSON.stringify({s:'found',l:l,x:(r.left+r.width/2)*d,y:(r.top+r.height/2)*d});}}}
           return JSON.stringify({s:'nobutton'});})()"""
+    }
+
+    /** Toque táctil real (da "activación de usuario" a la página; un click() de JS no abre el selector de archivos). */
+    private fun tap(w: WebView, x: Float, y: Float) {
+        val t = android.os.SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = android.view.MotionEvent.obtain(t, t + 60, android.view.MotionEvent.ACTION_UP, x, y, 0)
+        w.dispatchTouchEvent(down); w.dispatchTouchEvent(up); down.recycle(); up.recycle()
     }
 
     private fun submitJs(query: String): String = """(function(q){

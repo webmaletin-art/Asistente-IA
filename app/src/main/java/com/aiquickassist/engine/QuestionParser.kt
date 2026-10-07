@@ -130,7 +130,7 @@ object QuestionParser {
         lines.drop(end).firstOrNull { it.text.contains('?') }?.text.orEmpty()
 
     private fun finish(question: String, options: List<Option>, context: String): ParsedQuestion? {
-        val q = question.replace(Regex("^\\s*(pregunta\\s*)?\\d{1,3}\\s*[\\.\\)\\:-]\\s*", RegexOption.IGNORE_CASE), "").trim()
+        val q = question.replace(Regex("^\\s*[-•*–]\\s+"), "").replace(Regex("^\\s*(pregunta\\s*)?\\d{1,3}\\s*[\\.\\)\\:-]\\s*", RegexOption.IGNORE_CASE), "").trim()
         if (q.isBlank() && options.isEmpty()) return null
         val norm = options.map { TextUtil.normalize(it.text).trim() }
         val tfWords = setOf("verdadero", "falso", "true", "false", "v", "f", "cierto")

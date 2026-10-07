@@ -28,8 +28,17 @@ object GoogleText {
     fun searchUrl(q: String) = "https://www.google.com/search?hl=es&q=${enc(q)}"
     fun aiModeUrl(q: String) = "https://www.google.com/search?udm=50&hl=es" + if (q.isBlank()) "" else "&q=${enc(q)}"
 
+    /** Líneas que son código (CSS/JS) y no texto legible. */
+    fun looksLikeCode(l: String): Boolean {
+        if (l.contains('{') || l.contains('}')) return true
+        if (Regex("""^[.#@][\w-]+.*[:;]""").containsMatchIn(l) && l.count { it == ';' || it == ':' } >= 2) return true
+        if (l.contains("var(--") || l.contains("-webkit-") || l.contains("function(")) return true
+        val letters = l.count { it.isLetter() }
+        return l.length > 25 && letters < l.length * 0.55
+    }
+
     private fun lines(raw: String, drop: (String) -> Boolean): List<String> =
-        raw.lines().map { it.trim() }.filter { it.isNotEmpty() && !ui.matches(it) && !drop(it) }
+        raw.lines().map { it.trim() }.filter { it.isNotEmpty() && !ui.matches(it) && !looksLikeCode(it) && !drop(it) }
 
     /** Texto de la tarjeta "Visión general"; null si no hay contenido suficiente. */
     fun cleanOverview(raw: String): String? {

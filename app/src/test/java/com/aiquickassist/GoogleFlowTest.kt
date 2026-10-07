@@ -37,6 +37,13 @@ class GoogleFlowTest {
         assertNull(GoogleText.cleanOverview("Visión general creada por IA\nMostrar más"))
     }
 
+    @Test fun cssGarbageIsRejected() {
+        val css = ".zF5l1e{color:var(--m3c23,var(--Nsm0ce))}\n.zF5l1e{color:var(--Nsm0ce);-webkit-margin-before:-2px}.ux3"
+        assertNull(GoogleText.cleanOverview(css))
+        assertTrue(GoogleText.looksLikeCode(".a{color:red}"))
+        assertFalse(GoogleText.looksLikeCode("Una gota de lluvia cae a 9 m/s (aprox.)."))
+    }
+
     @Test fun aiModeCleaningDropsQueryEcho() {
         val t = GoogleText.cleanAiMode("¿Qué es esto?\nModo IA\nEs una arandela plana usada para repartir la carga de un tornillo o tuerca.", "¿Qué es esto?")
         assertEquals("Es una arandela plana usada para repartir la carga de un tornillo o tuerca.", t)
@@ -68,5 +75,6 @@ class GeminiModelTest {
         assertEquals("gemini-3.0-flash", com.aiquickassist.engine.GeminiEngine.pickModel(names))
         assertEquals("gemini-2.5-flash", com.aiquickassist.engine.GeminiEngine.pickModel(names.filter { !it.contains("3.0") }))
         assertNull(com.aiquickassist.engine.GeminiEngine.pickModel(listOf("models/embedding-001")))
+        assertEquals(listOf("gemini-3.0-flash", "gemini-3.0-pro-preview", "gemini-2.5-flash"), com.aiquickassist.engine.GeminiEngine.rankModels(names).take(3))
     }
 }
