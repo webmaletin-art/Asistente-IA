@@ -24,6 +24,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.aiquickassist.MainActivity
 import com.aiquickassist.R
+import com.aiquickassist.capture.CropStore
 import com.aiquickassist.capture.Ocr
 import com.aiquickassist.data.*
 import com.aiquickassist.engine.*
@@ -186,8 +187,8 @@ class OverlayService : Service() {
         }
     }
 
-    private fun openApp(route: String) {
-        startActivity(Intent(this, MainActivity::class.java).putExtra("route", route)
+    private fun openApp(route: String, url: String? = null) {
+        startActivity(Intent(this, MainActivity::class.java).putExtra("route", route).putExtra("url", url)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
@@ -239,32 +240,40 @@ class OverlayService : Service() {
 
     private fun showSelection(shot: Bitmap, tool: Tool) {
         remove(selectionView)
-        val v = SelectionView(this, shot, onCancel = { remove(selectionView); selectionView = null }, onAnalyze = { crop ->
+        val v = SelectionView(this, shot, askQuestion = tool == Tool.IMAGE, onCancel = { remove(selectionView); selectionView = null }, onAnalyze = { crop, q ->
             remove(selectionView); selectionView = null
-            launchAnalysis { analyzeCrop(crop, tool) }
+            launchAnalysis { analyzeCrop(crop, tool, q) }
         })
         selectionView = v
         val lp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
+        lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
         lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         wm.addView(v, lp)
     }
 
     private val visualRef = Regex("""esta imagen|siguiente imagen|figura|gr[aá]fico|diagrama|tri[aá]ngulo|c[ií]rculo|dibujo|this image|the image|diagram|figure|shown (above|below)""", RegexOption.IGNORE_CASE)
 
-    /** OCR local; la imagen solo se envía si la pregunta depende de ella (o si el usuario eligió Imagen). */
-    private suspend fun analyzeCrop(crop: Bitmap, tool: Tool): AnalysisResult {
+    /**
+     * OCR = región → TEXTO → Google Search (el OCR no cambia).
+     * IMAGEN = región → RECORTE REAL (archivo + Uri) → Google AI Mode / Gemini. El OCR solo aporta
+     * texto auxiliar; la imagen siempre viaja.
+     */
+    private suspend fun analyzeCrop(crop: Bitmap, tool: Tool, userQuestion: String): AnalysisResult {
         val text = runCatching { Ocr.read(crop) }.getOrDefault("")
         val parsed = QuestionParser.parseText(text, ocr = true)
-        val generic = ParsedQuestion(QType.OPEN, "Responde la pregunta o describe lo que muestra la imagen.")
-        val geminiOk = GeminiEngine.available() && Settings.engineMode != EngineMode.WEB
-        return when {
-            tool == Tool.IMAGE -> Analyzer.analyze(parsed ?: generic, crop)
-            parsed == null && geminiOk -> Analyzer.analyze(generic, crop)
-            parsed == null -> throw AnalysisException("No se detectó texto en la selección. Prueba el modo Imagen con Gemini.")
-            visualRef.containsMatchIn(text) && geminiOk -> Analyzer.analyze(parsed, crop)
-            else -> Analyzer.analyze(parsed)
+        if (tool == Tool.OCR) {
+            if (parsed == null) throw AnalysisException("No se detectó texto en la selección. Prueba el modo Imagen.")
+            val visual = visualRef.containsMatchIn(text) && Settings.aiVisual && Settings.aiModeEnabled && Settings.engineMode != EngineMode.GEMINI
+            return if (visual) Analyzer.analyze(parsed, CropImage(crop, CropStore.save(this, crop))) else Analyzer.analyze(parsed)
         }
+        val image = CropImage(crop, CropStore.save(this, crop))
+        val p = when {
+            userQuestion.isNotBlank() -> ParsedQuestion(QType.OPEN, userQuestion, context = text.take(1500), hasImage = true)
+            parsed != null && (parsed.options.isNotEmpty() || parsed.question.contains('?')) -> parsed.copy(hasImage = true)
+            else -> ParsedQuestion(QType.OPEN, "", context = text.take(1500), hasImage = true)
+        }
+        return Analyzer.analyze(p, image)
     }
 
     // ---------------- Panel de respuesta / búsqueda ----------------
@@ -286,7 +295,7 @@ class OverlayService : Service() {
                     ResultPanel(state.panel, onClose = ::resetIdle, onSearch = {
                         val d = state.panel as? PanelState.Done
                         state.searchText = d?.result?.parsed?.question.orEmpty(); state.searchOpen = true
-                    }, onConfigureGemini = { resetIdle(); openApp("gemini") })
+                    }, onConfigureGemini = { resetIdle(); openApp("gemini") }, onOpenGoogle = { u -> resetIdle(); openApp("browser", u) })
                 }
             }
         }

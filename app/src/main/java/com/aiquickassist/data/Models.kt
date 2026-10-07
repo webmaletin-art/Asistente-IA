@@ -1,7 +1,8 @@
 package com.aiquickassist.data
 
 enum class EngineMode(val label: String) {
-    WEB("Visión general creada por IA"),
+    OVERVIEW("Visión general de Google"),
+    AI_MODE("Google AI Mode"),
     GEMINI("Gemini"),
     BOTH("Mejor respuesta — ambos")
 }
@@ -45,33 +46,47 @@ data class ParsedQuestion(
 
 data class Source(val title: String, val url: String, val snippet: String = "")
 
+/** Fuente real de una respuesta. Se conserva hasta la UI y nunca se reetiqueta. */
+enum class Origin(val label: String) {
+    GOOGLE_AI_OVERVIEW("Visión general de Google"),
+    GOOGLE_AI_MODE("Google AI Mode"),
+    GOOGLE_SEARCH("Google"),
+    GEMINI("Gemini"),
+    OCR_LOCAL("OCR local"),
+    UNKNOWN("Desconocido")
+}
+
 /** Respuesta de un motor. [choice] contiene las etiquetas elegidas (p. ej. ["B"]). */
 data class Block(
-    val title: String,
+    val origin: Origin,
     val choice: List<String> = emptyList(),
     val answer: String = "",
     val explanation: String = "",
     val sources: List<Source> = emptyList(),
     val confidence: Double = 0.0
-)
+) {
+    val title: String get() = origin.label
+}
 
 data class AnalysisResult(
     val parsed: ParsedQuestion,
     val mode: EngineMode,
     val best: Block,
-    val web: Block? = null,
+    val google: Block? = null,
     val gemini: Block? = null,
     val note: String? = null,
-    val related: List<Source> = emptyList(),
+    val googleUrl: String? = null,
+    val withImage: Boolean = false,
     val manual: Boolean = false
 ) {
     val engineLabel: String
-        get() = when {
-            mode == EngineMode.BOTH && web != null && gemini != null -> "Ambos"
-            mode == EngineMode.BOTH && gemini != null -> "Gemini"
-            mode == EngineMode.GEMINI -> "Gemini"
-            else -> "Visión general creada por IA"
-        }
+        get() = if (google != null && gemini != null) "Google + Gemini" else best.origin.label
 }
 
-class AnalysisException(message: String, val needsGemini: Boolean = false) : Exception(message)
+/** [googleUrl]/[openLabel]: permite al usuario continuar en la página real de Google. */
+class AnalysisException(
+    message: String,
+    val needsGemini: Boolean = false,
+    val googleUrl: String? = null,
+    val openLabel: String? = null
+) : Exception(message)

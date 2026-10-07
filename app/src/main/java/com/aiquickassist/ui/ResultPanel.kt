@@ -38,6 +38,7 @@ fun ResultPanel(
     onClose: () -> Unit,
     onSearch: () -> Unit,
     onConfigureGemini: () -> Unit,
+    onOpenGoogle: (String) -> Unit,
     modifier: Modifier = Modifier,
     maxHeight: androidx.compose.ui.unit.Dp = 520.dp
 ) {
@@ -64,9 +65,12 @@ fun ResultPanel(
                     Text(state.message, Modifier.weight(1f), fontSize = 15.sp)
                     IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar") }
                 }
-                if (state.needsGemini) WireButton("Configurar Gemini", Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), onClick = onConfigureGemini)
+                Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                    if (state.needsGemini) WireButton("Configurar Gemini", onClick = onConfigureGemini)
+                    if (state.url != null) WireButton(state.urlLabel ?: "Ver resultados de Google") { onOpenGoogle(state.url) }
+                }
             }
-            is PanelState.Done -> DoneContent(state.result, expanded, { expanded = !expanded }, onClose, onSearch)
+            is PanelState.Done -> DoneContent(state.result, expanded, { expanded = !expanded }, onClose, onSearch, onOpenGoogle)
             else -> {}
         }
     }
@@ -75,7 +79,7 @@ fun ResultPanel(
 private val Color0 = C.line
 
 @Composable
-private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit) {
+private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit, onOpenGoogle: (String) -> Unit) {
     val b = r.best
     val head = if (b.choice.isNotEmpty()) "✓ " + b.choice.joinToString(", ") else if (b.confidence > 0) "✓" else "?"
     val headColor = if (b.choice.isNotEmpty() || b.confidence > 0) C.ok else C.sub
@@ -85,10 +89,15 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(head, color = headColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            if (!expanded) Text(b.answer.ifBlank { r.note.orEmpty() }, fontSize = 15.sp, maxLines = 2)
+            Text(b.origin.label, fontSize = 12.sp, color = C.sub)
+            if (!expanded) Text(b.answer.ifBlank { r.note.orEmpty() }, fontSize = 15.sp, maxLines = 3)
         }
         if (Settings.manualSearch) IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Buscar") }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar") }
+    }
+    if (r.googleUrl != null && Settings.openInGoogle) {
+        WireButton(if (r.best.origin == Origin.GOOGLE_AI_MODE || r.google?.origin == Origin.GOOGLE_AI_MODE) "Abrir Google AI Mode" else "Ver en Google",
+            Modifier.padding(start = 14.dp, bottom = 10.dp)) { onOpenGoogle(r.googleUrl) }
     }
     if (!expanded) return
 
@@ -104,12 +113,10 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
 
         if (Settings.showExplanation && b.explanation.isNotBlank()) { Label("Explicación"); Text(b.explanation, fontSize = 14.sp) }
 
-        if (Settings.showComplementary) {
-            val collapsible = r.mode == EngineMode.BOTH
-            r.web?.let { EngineBlock("VISIÓN GENERAL CREADA POR IA", it, collapsible) }
-            r.gemini?.let { EngineBlock("GEMINI", it, collapsible) }
+        if (Settings.showComplementary && r.google != null && r.gemini != null) {
+            r.google?.let { EngineBlock(it.title.uppercase(), it) }
+            r.gemini?.let { EngineBlock("GEMINI", it) }
         }
-        if (r.mode == EngineMode.BOTH && r.web != null && r.gemini != null) { Label("MEJOR RESPUESTA"); Text(b.choice.joinToString(", ") + " " + b.answer, fontSize = 14.sp) }
 
         if (Settings.showSources && b.sources.isNotEmpty()) {
             Label("Fuentes")
@@ -117,27 +124,17 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
                 Text(it.title, fontSize = 14.sp, color = C.blue, modifier = Modifier.clickable { runCatching { uri.openUri(it.url) } }.padding(vertical = 2.dp))
             }
         }
-        if (Settings.showComplementary && r.related.isNotEmpty()) {
-            Label(if (r.manual) "Resultado de búsqueda" else "Información relacionada")
-            r.related.take(5).forEach {
-                Text(it.title, fontSize = 14.sp, color = C.blue, modifier = Modifier.clickable { if (it.url.isNotBlank()) runCatching { uri.openUri(it.url) } }.padding(top = 4.dp))
-                if (it.snippet.isNotBlank()) Text(it.snippet.take(160), fontSize = 12.sp, color = C.sub)
-            }
-        }
     }
 }
 
 @Composable
-private fun EngineBlock(title: String, b: Block, collapsible: Boolean) {
-    var open by remember { mutableStateOf(!collapsible) }
-    Row(Modifier.fillMaxWidth().clickable(enabled = collapsible) { open = !open }.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        if (collapsible) Text(if (open) "−" else "+", fontSize = 18.sp, color = C.sub)
-    }
-    if (open) {
+private fun EngineBlock(title: String, b: Block) {
+    Text("$title:", fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp))
+    run {
         Text((b.choice.joinToString(", ").let { if (it.isNotEmpty()) "$it. " else "" }) + b.answer, fontSize = 14.sp)
-        if (b.explanation.isNotBlank() && b.explanation != b.answer) Text(b.explanation, fontSize = 13.sp, color = C.sub)
-        b.sources.filter { it.url.isNotBlank() }.take(2).forEach { Text("Fuente: ${it.title}", fontSize = 12.sp, color = C.sub) }
+        if (b.explanation.isNotBlank() && b.explanation != b.answer) Text(b.explanation.take(900), fontSize = 13.sp, color = C.sub)
+        val uri = LocalUriHandler.current
+        b.sources.filter { it.url.isNotBlank() }.take(3).forEach { Text(it.title, fontSize = 12.sp, color = C.blue, modifier = Modifier.clickable { runCatching { uri.openUri(it.url) } }) }
     }
 }
 

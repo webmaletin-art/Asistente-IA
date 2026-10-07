@@ -11,5 +11,6 @@ class App : Application() {
         Settings.init(this)
         SecureStore.init(this)
         HistoryStore.init(this)
+        com.aiquickassist.engine.GoogleEngine.init(this)
     }
 }

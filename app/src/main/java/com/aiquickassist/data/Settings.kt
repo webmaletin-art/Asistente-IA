@@ -60,10 +60,17 @@ object Settings {
     ).also { props += it }
 
     // Motor
-    var engineMode by enum("engineMode", EngineMode.WEB)
+    var engineMode by enum("engineMode", EngineMode.OVERVIEW)
     var geminiEnabled by bool("geminiEnabled", true)
     var geminiModel by str("geminiModel", "gemini-2.5-flash")
     var defaultTool by enum("defaultTool", Tool.TEXT)
+
+    // Google AI Mode
+    var aiModeEnabled by bool("aiModeEnabled", true)
+    var aiUseImages by bool("aiUseImages", true)
+    var aiVisual by bool("aiVisual", true)
+    var aiPreferImages by bool("aiPreferImages", true)
+    var openInGoogle by bool("openInGoogle", true)
 
     // Búsqueda
     var manualSearch by bool("manualSearch", true)

@@ -15,6 +15,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        intent?.getStringExtra("url")?.let { com.aiquickassist.ui.BrowserLaunch.url = it }
         pendingRoute = intent?.getStringExtra("route")
         setContent {
             AppTheme {
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
                     "engine" -> EngineScreen(nav)
                     "web" -> WebEngineScreen(nav)
                     "gemini" -> GeminiScreen(nav)
+                    "googleai" -> GoogleAiScreen(nav)
                     "bubble" -> BubbleSettingsScreen(nav)
                     "history" -> HistoryScreen(nav)
                     "permissions" -> PermissionsScreen(nav)
@@ -42,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        intent.getStringExtra("url")?.let { com.aiquickassist.ui.BrowserLaunch.url = it }
         intent.getStringExtra("route")?.let { pendingRoute = it }
     }
 }

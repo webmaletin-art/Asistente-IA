@@ -1,11 +1,18 @@
 package com.aiquickassist.engine
 
 import android.graphics.Bitmap
+import android.net.Uri
 import com.aiquickassist.data.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
-/** Orquesta los motores según el modo elegido, con respaldo y caché en memoria. */
+/** Recorte real: bitmap (para Gemini) + Uri del archivo temporal (para Google). */
+class CropImage(val bitmap: Bitmap, val uri: Uri)
+
+/**
+ * Orquesta los motores. Cada respuesta conserva su [Origin]; nunca se reetiqueta.
+ * No hay sustitutos de Google: si Google no responde, se dice y se ofrece abrir Google.
+ */
 object Analyzer {
     private val cache = object : LinkedHashMap<String, AnalysisResult>(32, 0.75f, true) {
         override fun removeEldestEntry(e: MutableMap.MutableEntry<String, AnalysisResult>?) = size > 40
@@ -19,71 +26,76 @@ object Analyzer {
         return analyze(parsed, null, manual = true)
     }
 
-    suspend fun analyze(p: ParsedQuestion, image: Bitmap? = null, manual: Boolean = false): AnalysisResult {
+    suspend fun analyze(p: ParsedQuestion, image: CropImage? = null, manual: Boolean = false): AnalysisResult {
         val mode = Settings.engineMode
-        val key = "$mode|${p.type}|${p.question}|${p.options}|${p.context.take(80)}|${image != null}"
+        val key = "$mode|${p.type}|${p.question}|${p.options}|${p.context.take(80)}"
         if (image == null) synchronized(cache) { cache[key] }?.let { return it.copy(manual = manual) }
 
         val r = when (mode) {
-            EngineMode.WEB -> webOnly(p, image != null, manual)
             EngineMode.GEMINI -> {
-                val g = GeminiEngine.ask(p.copy(hasImage = image != null), image)
-                AnalysisResult(p, mode, g, gemini = g, manual = manual)
+                val g = GeminiEngine.ask(p.copy(hasImage = image != null), image?.bitmap)
+                AnalysisResult(p, mode, g, gemini = g, withImage = image != null)
             }
-            EngineMode.BOTH -> both(p, image, manual)
+            EngineMode.BOTH -> both(p, image)
+            else -> {
+                val (g, url, note) = google(p, image, mode)
+                AnalysisResult(p, mode, g, google = g, googleUrl = url, note = note, withImage = image != null)
+            }
         }
-        if (image == null && r.best.choice.isNotEmpty() || r.best.answer.isNotBlank() && image == null)
-            synchronized(cache) { cache[key] = r }
+        if (image == null) synchronized(cache) { cache[key] = r }
         return r.copy(manual = manual)
     }
 
-    private suspend fun webOnly(p: ParsedQuestion, hadImage: Boolean, manual: Boolean): AnalysisResult {
-        val w = WebEngine.answer(p)
-        val ev = if (manual || p.type == QType.OPEN || p.type == QType.DEFINITION) runCatching { WebEngine.search(WebEngine.queryFor(p), TextUtil.isSpanish(p.question)) }.getOrNull() else null
-        val note = if (hadImage) "Este motor solo analiza texto: la imagen no se envió." else null
-        return AnalysisResult(p, EngineMode.WEB, w, web = w, note = note, related = ev?.related.orEmpty() + ev?.pages.orEmpty().map { Source(it.title, it.url, it.snippet) })
+    private data class G(val block: Block, val url: String, val note: String?)
+
+    /** Elige el producto de Google: AI Mode para imágenes y modo AI Mode; Visión general para texto. */
+    private suspend fun google(p: ParsedQuestion, image: CropImage?, mode: EngineMode): G {
+        val q = GoogleText.query(p)
+        if (image != null) {
+            if (!Settings.aiModeEnabled || !Settings.aiUseImages)
+                throw AnalysisException("Google AI Mode está desactivado para imágenes (Configuración → Google AI Mode).")
+            if (mode == EngineMode.OVERVIEW && !Settings.aiPreferImages) {
+                if (p.question.isBlank()) throw AnalysisException("La Visión general de Google no analiza imágenes. Activa «Preferir AI Mode para imágenes».")
+                return G(GoogleEngine.overview(q).block, GoogleText.searchUrl(q), "Imagen no enviada: se usó solo el texto.")
+            }
+            val a = GoogleEngine.aiMode(p.question, image.uri)
+            return G(a.block, a.url, null)
+        }
+        if (mode == EngineMode.AI_MODE) {
+            if (!Settings.aiModeEnabled) throw AnalysisException("Google AI Mode está desactivado (Configuración → Google AI Mode).")
+            val a = GoogleEngine.aiMode(q, null)
+            return G(a.block, a.url, null)
+        }
+        val a = GoogleEngine.overview(q)
+        return G(a.block, a.url, null)
     }
 
-    private suspend fun both(p: ParsedQuestion, image: Bitmap?, manual: Boolean): AnalysisResult = coroutineScope {
-        val webD = async { runCatching { WebEngine.answer(p) } }
-        val gemD = async {
-            if (GeminiEngine.available()) runCatching { GeminiEngine.ask(p.copy(hasImage = image != null), image) }
-            else Result.failure(AnalysisException("Gemini no está disponible.", needsGemini = true))
+    /** Google y Gemini por separado; se muestran ambos sin mezclar etiquetas. */
+    private suspend fun both(p: ParsedQuestion, image: CropImage?): AnalysisResult = coroutineScope {
+        val gD = async { runCatching { google(p, image, if (image != null) EngineMode.AI_MODE else EngineMode.OVERVIEW) } }
+        val mD = async {
+            if (GeminiEngine.available()) runCatching { GeminiEngine.ask(p.copy(hasImage = image != null), image?.bitmap) }
+            else Result.failure(AnalysisException("Gemini no está configurado.", needsGemini = true))
         }
-        val w = webD.await().getOrNull()
-        val gRes = gemD.await()
-        val g = gRes.getOrNull()
-        val gErr = gRes.exceptionOrNull()?.message
-        val wErr = webD.await().exceptionOrNull()?.message
-
-        if (w == null && g == null) throw AnalysisException("Ambos motores fallaron. Web: $wErr. Gemini: $gErr")
-        val ev = if (manual) runCatching { WebEngine.search(WebEngine.queryFor(p), TextUtil.isSpanish(p.question)) }.getOrNull() else null
-        val related = ev?.related.orEmpty() + ev?.pages.orEmpty().map { Source(it.title, it.url, it.snippet) }
-
-        val (best, note) = when {
-            g == null -> w!!.copy(title = "MEJOR RESPUESTA") to "Gemini no está disponible (${gErr ?: "sin configurar"}); se muestra solo el motor web."
-            w == null || (w.choice.isEmpty() && w.confidence == 0.0 && p.options.isNotEmpty()) ->
-                g.copy(title = "MEJOR RESPUESTA") to (if (w == null) "El motor web no respondió; se muestra Gemini." else null)
-            else -> merge(p, w, g)
+        val g = gD.await(); val m = mD.await()
+        val gg = g.getOrNull(); val mm = m.getOrNull()
+        if (gg == null && mm == null) {
+            val ge = g.exceptionOrNull() as? AnalysisException
+            throw AnalysisException("Google: ${g.exceptionOrNull()?.message}. Gemini: ${m.exceptionOrNull()?.message}",
+                needsGemini = (m.exceptionOrNull() as? AnalysisException)?.needsGemini == true,
+                googleUrl = ge?.googleUrl, openLabel = ge?.openLabel)
         }
-        AnalysisResult(p, EngineMode.BOTH, best, web = w, gemini = g, note = note, related = related)
+        val note = compare(gg?.block, mm, g.exceptionOrNull()?.message, m.exceptionOrNull()?.message)
+        val best = mm ?: gg!!.block
+        AnalysisResult(p, EngineMode.BOTH, best, google = gg?.block, gemini = mm, note = note,
+            googleUrl = gg?.url ?: (g.exceptionOrNull() as? AnalysisException)?.googleUrl, withImage = image != null)
     }
 
-    private fun merge(p: ParsedQuestion, w: Block, g: Block): Pair<Block, String?> {
-        val title = "MEJOR RESPUESTA"
-        val sources = (g.sources + w.sources).distinctBy { it.url }
-        if (p.options.isNotEmpty()) {
-            if (w.choice.toSet() == g.choice.toSet() && g.choice.isNotEmpty())
-                return g.copy(title = title, sources = sources, confidence = maxOf(g.confidence, 0.9)) to null
-            // Discrepancia: se favorece a Gemini (razona sobre la pregunta) salvo que la web sea mucho más segura
-            val useWeb = w.choice.isNotEmpty() && w.confidence > g.confidence + 0.25 && g.choice.isEmpty()
-            val pick = if (useWeb) w else g
-            val note = "Los motores no coinciden (web: ${w.choice.joinToString().ifBlank { "—" }}, Gemini: ${g.choice.joinToString().ifBlank { "—" }}). " +
-                "Se muestra la opción más razonable; hay incertidumbre."
-            return pick.copy(title = title, sources = sources, confidence = minOf(pick.confidence, 0.6)) to note
-        }
-        val sim = TextUtil.overlap(w.answer, g.answer + " " + g.explanation)
-        val note = if (sim < 0.08) "Las respuestas de ambos motores difieren bastante; contrasta con las fuentes." else null
-        return g.copy(title = title, sources = sources, confidence = if (note == null) 0.85 else 0.5) to note
+    fun compare(google: Block?, gemini: Block?, gErr: String?, mErr: String?): String? = when {
+        google == null -> "Google no respondió (${gErr ?: "sin datos"}); se muestra solo Gemini."
+        gemini == null -> "Gemini no está disponible (${mErr ?: "sin configurar"}); se muestra solo Google."
+        TextUtil.overlap(google.answer + " " + google.explanation, gemini.answer + " " + gemini.explanation) >= 0.12 ->
+            "Google y Gemini coinciden en lo esencial."
+        else -> "Google y Gemini difieren; contrasta ambas respuestas."
     }
 }

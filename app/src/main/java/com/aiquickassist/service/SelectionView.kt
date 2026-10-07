@@ -14,9 +14,22 @@ import android.widget.LinearLayout
 class SelectionView(
     context: Context,
     private val shot: Bitmap,
+    askQuestion: Boolean,
     onCancel: () -> Unit,
-    onAnalyze: (Bitmap) -> Unit
+    onAnalyze: (Bitmap, String) -> Unit
 ) : FrameLayout(context) {
+    companion object {
+        /** Rectángulo de la vista → píxeles de la captura: [x, y, ancho, alto]. Es el recorte exacto. */
+        fun cropRect(l: Float, t: Float, r: Float, b: Float, viewW: Int, viewH: Int, bmpW: Int, bmpH: Int): IntArray {
+            val sx = bmpW / viewW.toFloat(); val sy = bmpH / viewH.toFloat()
+            val x0 = (l * sx).toInt().coerceIn(0, bmpW - 2)
+            val y0 = (t * sy).toInt().coerceIn(0, bmpH - 2)
+            val x1 = (r * sx).toInt().coerceIn(x0 + 1, bmpW)
+            val y1 = (b * sy).toInt().coerceIn(y0 + 1, bmpH)
+            return intArrayOf(x0, y0, x1 - x0, y1 - y0)
+        }
+    }
+    private var question: android.widget.EditText? = null
 
     private val d = resources.displayMetrics.density
     private val rect = RectF()
@@ -43,15 +56,23 @@ class SelectionView(
 
     init {
         addView(canvasView, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val bar = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; setPadding(16 * d.toInt(), 8 * d.toInt(), 16 * d.toInt(), 8 * d.toInt()); setBackgroundColor(Color.WHITE) }
+        val bar = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(16 * d.toInt(), 8 * d.toInt(), 16 * d.toInt(), 8 * d.toInt()); setBackgroundColor(Color.WHITE) }
+        if (askQuestion) {
+            question = android.widget.EditText(context).apply {
+                hint = "Pregunta sobre la imagen (opcional)"; setSingleLine(true); setTextColor(Color.BLACK); textSize = 15f
+            }
+            bar.addView(question, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        bar.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         fun btn(t: String, a: () -> Unit) = Button(context).apply {
             text = t; isAllCaps = false; setTextColor(Color.BLACK)
             background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.WHITE); setStroke(d.toInt().coerceAtLeast(1), 0xFF999999.toInt()); cornerRadius = 6 * d }
             setOnClickListener { a() }
-            bar.addView(this, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(8 * d.toInt(), 0, 8 * d.toInt(), 0) })
+            row.addView(this, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(8 * d.toInt(), 0, 8 * d.toInt(), 0) })
         }
         btn("Cancelar") { onCancel() }
-        btn("Analizar") { onAnalyze(crop()) }
+        btn(if (askQuestion) "Enviar imagen" else "Analizar") { onAnalyze(crop(), question?.text?.toString().orEmpty().trim()) }
         addView(bar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
     }
 
@@ -60,12 +81,8 @@ class SelectionView(
     }
 
     private fun crop(): Bitmap {
-        val sx = shot.width / canvasView.width.toFloat(); val sy = shot.height / canvasView.height.toFloat()
-        val l = (rect.left * sx).toInt().coerceIn(0, shot.width - 2)
-        val t = (rect.top * sy).toInt().coerceIn(0, shot.height - 2)
-        val r = (rect.right * sx).toInt().coerceIn(l + 1, shot.width)
-        val b = (rect.bottom * sy).toInt().coerceIn(t + 1, shot.height)
-        return Bitmap.createBitmap(shot, l, t, r - l, b - t)
+        val c = cropRect(rect.left, rect.top, rect.right, rect.bottom, canvasView.width, canvasView.height, shot.width, shot.height)
+        return Bitmap.createBitmap(shot, c[0], c[1], c[2], c[3])
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {

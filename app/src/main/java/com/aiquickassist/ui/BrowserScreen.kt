@@ -40,6 +40,9 @@ import org.json.JSONObject
 
 private const val HOME = "https://www.google.com"
 
+/** URL que otras partes de la app piden abrir en el navegador (p. ej. «Ver en Google»). */
+object BrowserLaunch { var url by mutableStateOf<String?>(null) }
+
 private class BrowserTab(val id: Int) {
     var title by mutableStateOf("Nueva pestaña")
     var url by mutableStateOf(HOME)
@@ -69,7 +72,11 @@ private const val EXTRACT_JS = """
 fun BrowserScreen(nav: Nav) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val tabs = remember { mutableStateListOf(BrowserTab(0)) }
+    val tabs = remember { mutableStateListOf(BrowserTab(0).apply { BrowserLaunch.url?.let { url = it; BrowserLaunch.url = null } }) }
+    var chooserCb by remember { mutableStateOf<android.webkit.ValueCallback<Array<android.net.Uri>>?>(null) }
+    val pickImage = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        chooserCb?.onReceiveValue(uri?.let { arrayOf(it) }); chooserCb = null
+    }
     var current by remember { mutableIntStateOf(0) }
     var nextId by remember { mutableIntStateOf(1) }
     val tab = tabs[current.coerceIn(0, tabs.lastIndex)]
@@ -84,6 +91,9 @@ fun BrowserScreen(nav: Nav) {
             t.contains(' ') || !t.contains('.') -> "https://www.google.com/search?q=" + Http.enc(t)
             else -> "https://$t"
         }
+    }
+    LaunchedEffect(BrowserLaunch.url) {
+        BrowserLaunch.url?.let { u -> tab.url = u; tab.web?.loadUrl(u); BrowserLaunch.url = null }
     }
     fun load(s: String) { val u = normalize(s); tab.url = u; tab.web?.loadUrl(u) }
 
@@ -173,6 +183,14 @@ fun BrowserScreen(nav: Nav) {
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(v: WebView, p: Int) { tab.progress = p }
                                 override fun onReceivedTitle(v: WebView, t: String?) { if (!t.isNullOrBlank()) tab.title = t }
+                                // Google pide una imagen: se entrega el recorte real si existe; si no, el selector del sistema
+                                override fun onShowFileChooser(v: WebView, cb: android.webkit.ValueCallback<Array<android.net.Uri>>, p: FileChooserParams): Boolean {
+                                    val crop = com.aiquickassist.engine.GoogleEngine.currentUpload()
+                                    if (crop != null) { cb.onReceiveValue(arrayOf(crop)); return true }
+                                    chooserCb?.onReceiveValue(null); chooserCb = cb
+                                    pickImage.launch("image/*")
+                                    return true
+                                }
                             }
                             tab.web = this
                             loadUrl(tab.url)
@@ -189,7 +207,8 @@ fun BrowserScreen(nav: Nav) {
                 if (assist.panel is PanelState.Loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Color.Black, trackColor = C.line)
                 ResultPanel(assist.panel, onClose = { assist.panel = PanelState.None }, onSearch = {
                     assist.searchText = (assist.panel as? PanelState.Done)?.result?.parsed?.question.orEmpty(); assist.searchOpen = true
-                }, onConfigureGemini = { assist.panel = PanelState.None; nav.go("gemini") })
+                }, onConfigureGemini = { assist.panel = PanelState.None; nav.go("gemini") },
+                    onOpenGoogle = { u -> assist.panel = PanelState.None; tab.url = u; tab.web?.loadUrl(u) })
             }
         }
     }

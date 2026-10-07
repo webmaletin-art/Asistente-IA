@@ -8,15 +8,22 @@ Kotlin · Jetpack Compose · Android nativo (minSdk 30).
 ## Motores
 | Modo | Qué hace |
 |---|---|
-| Visión general creada por IA | Consulta fuentes públicas (DuckDuckGo Instant Answer y Wikipedia) por sus APIs abiertas. Sin scraping, sin APIs privadas. Si no hay resumen de IA disponible usa los resultados web. Funciona sin Gemini. |
-| Gemini (opcional) | Usa **tu propia** clave y cuota. Sin clave en el repositorio ni en el APK. |
-| Mejor respuesta — ambos | Ejecuta los dos, compara y compone una respuesta sin contradicciones; indica incertidumbre si difieren. Si Gemini no está configurado usa solo el motor web y lo avisa. |
+| Visión general de Google | Busca la pregunta en Google (WebView, tu sesión) y lee la **verdadera** «Visión general creada por IA» si Google la muestra. Si no existe: «Visión general de Google no disponible» + **Ver resultados de Google**. No usa DuckDuckGo, Wikipedia ni «primer resultado». |
+| Google AI Mode | `udm=50`. Con imagen, entrega el recorte real al selector de archivos de la propia página de Google. |
+| Gemini (opcional) | Tu propia clave y cuota (Android Keystore). Texto o imagen + pregunta. |
+| Mejor respuesta — ambos | Google y Gemini por separado, cada uno con su etiqueta, más una comparación (coinciden / difieren). |
 
-"Solo Gemini" nunca cambia a otro motor: si no está configurado muestra *Gemini no está configurado* + botón **Configurar Gemini**.
+Cada respuesta lleva su fuente (`GOOGLE_AI_OVERVIEW`, `GOOGLE_AI_MODE`, `GOOGLE_SEARCH`, `GEMINI`, `OCR_LOCAL`, `UNKNOWN`) hasta la UI. Si Google no responde no se inventa nada: *«No se pudo obtener una respuesta confiable de Google»* + botón para abrir Google / AI Mode.
+
+## Flujos
+- **Texto**: pregunta → Google Search → Visión general real si existe.
+- **OCR**: región → OCR local → texto → Google Search (igual que antes).
+- **Imagen**: región → **recorte real** (PNG/JPEG en caché + `content://` por FileProvider) → Google AI Mode (o Gemini). El OCR solo aporta texto auxiliar. Puedes escribir una pregunta opcional en el selector.
+- **Imagen + pregunta**: recorte + pregunta → AI Mode / Gemini.
 
 ## Arquitectura (`app/src/main/java/com/aiquickassist`)
 - `data/` — modelos, `Settings` (prefs observables), `SecureStore` (Android Keystore AES‑GCM), `HistoryStore` (JSON local).
-- `engine/` — `QuestionParser` (tipo + opciones), `WebEngine`, `GeminiEngine`, `Analyzer` (modos, fallback, caché), `Assist` (estado de UI).
+- `engine/` — `QuestionParser`, `GoogleEngine` (WebView + lectura de Visión general / AI Mode), `GoogleText` (consultas y limpieza), `GeminiEngine`, `Analyzer`, `Assist` (estado de UI).
 - `capture/` — `ScreenReader` (texto vía accesibilidad), `Ocr` (ML Kit local).
 - `service/` — `OverlayService` (burbuja, menú, panel), `BubbleView/Renderer`, `SelectionView` (rectángulo OCR), `AssistAccessibilityService`.
 - `ui/` — pantallas Compose estilo wireframe (Material, blanco/gris/negro).
@@ -50,7 +57,7 @@ Requiere JDK 17 y Android SDK 35.
 `.github/workflows/build-apk.yml` corre en cada push y manualmente (*Actions → Build APK → Run workflow*). El APK queda como **artifact** (`app-debug`, `app-release`) en la página de la ejecución. No usa secretos.
 
 ## Limitaciones reales
-- No existe una API pública de la “Visión general creada por IA” de buscadores: el motor web usa DuckDuckGo Instant Answer y Wikipedia y elige la opción por coincidencia con las fuentes (heurístico, menos fiable que Gemini; V/F y traducción son aproximados).
+- Google no ofrece API para la Visión general ni AI Mode: se leen desde la página en un WebView. Si Google cambia su HTML, muestra CAPTCHA/consentimiento o no ofrece Visión general para esa consulta, la app lo dice y abre Google; nunca evade protecciones. La subida automática de imagen a AI Mode depende de que Google exponga el botón de adjuntar; si falla, «Abrir Google AI Mode» deja el recorte listo para el selector de archivos.
 - Extracción de texto: depende de que la app exponga su contenido a accesibilidad; si no, se usa OCR. Algunas apps (DRM/`FLAG_SECURE`) bloquean la captura.
 - Captura vía accesibilidad (Android 11+); Android limita a ~1 captura por segundo.
 - OCR: ML Kit (alfabeto latino). Con varias preguntas en pantalla se analiza la primera con opciones; usa OCR/selección para acotar.

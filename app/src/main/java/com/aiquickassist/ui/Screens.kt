@@ -87,7 +87,8 @@ fun HomeScreen(nav: Nav) {
 @Composable
 fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
     Section("Asistente IA")
-    Item("Visión general creada por IA", onClick = { nav.go("web") })
+    Item("Visión general de Google", onClick = { nav.go("web") })
+    Item("Google AI Mode", if (Settings.aiModeEnabled) "Activado" else "Desactivado", onClick = { nav.go("googleai") })
     Item("Gemini", if (SecureStore.hasGeminiKey()) "Configurado" else "No configurado", onClick = { nav.go("gemini") })
     Item("Motor de respuesta", Settings.engineMode.label, onClick = { nav.go("engine") })
 
@@ -121,35 +122,53 @@ fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
 }
 
 @Composable
-fun EngineScreen(nav: Nav) = Screen("Motor de respuesta", nav::back) {
+fun EngineScreen(nav: Nav) = Screen("Motores de respuesta", nav::back) {
     Spacer(Modifier.height(8.dp))
     EngineMode.entries.forEach { m ->
         RadioItem(
             m.label, Settings.engineMode == m,
             when (m) {
-                EngineMode.WEB -> "Solo resultados web. Funciona sin Gemini."
+                EngineMode.OVERVIEW -> "Pregunta → Google → Visión general real. Si Google no la muestra, lo dice."
+                EngineMode.AI_MODE -> "Google AI Mode para texto e imágenes (usa tu sesión de Google)."
                 EngineMode.GEMINI -> "Solo Gemini. Requiere tu propia clave."
-                EngineMode.BOTH -> "Usa ambos y compone la mejor respuesta."
+                EngineMode.BOTH -> "Google y Gemini por separado, con comparación."
             }
         ) { Settings.engineMode = m }
     }
-    if (Settings.engineMode != EngineMode.WEB && !SecureStore.hasGeminiKey()) {
+    if ((Settings.engineMode == EngineMode.GEMINI || Settings.engineMode == EngineMode.BOTH) && !SecureStore.hasGeminiKey()) {
         Text("Gemini no está configurado.", color = C.err, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
         WireButton("Configurar Gemini", Modifier.padding(horizontal = 16.dp)) { nav.go("gemini") }
     }
 }
 
 @Composable
-fun WebEngineScreen(nav: Nav) = Screen("Visión general creada por IA", nav::back) {
+fun WebEngineScreen(nav: Nav) = Screen("Visión general de Google", nav::back) {
     Text(
-        "Consulta fuentes públicas (resúmenes web y Wikipedia) mediante sus interfaces abiertas, sin scraping agresivo ni APIs privadas. " +
-            "Si no hay un resumen de IA disponible, usa los resultados web disponibles.",
+        "Busca tu pregunta en Google y muestra la verdadera «Visión general creada por IA» cuando Google la ofrece. " +
+            "Si no existe, se indica «Visión general de Google no disponible» y puedes seguir en los resultados de Google. " +
+            "Nunca se sustituye por otros buscadores ni se inventa una respuesta.",
         fontSize = 14.sp, color = C.sub, modifier = Modifier.padding(16.dp)
     )
     Section("Búsqueda")
     SwitchItem("Usar búsqueda manual", Settings.manualSearch) { Settings.manualSearch = it }
     SwitchItem("Mostrar fuentes", Settings.showSources) { Settings.showSources = it }
     SwitchItem("Mostrar resultados complementarios", Settings.showComplementary) { Settings.showComplementary = it }
+    SwitchItem("Abrir resultados en Google", Settings.openInGoogle, "Botón «Ver en Google» en el panel") { Settings.openInGoogle = it }
+    Text("Si Google pide verificación o consentimiento, se abre su página en el navegador de la app para que la completes tú.", fontSize = 12.sp, color = C.sub, modifier = Modifier.padding(16.dp))
+}
+
+@Composable
+fun GoogleAiScreen(nav: Nav) = Screen("Google AI Mode", nav::back) {
+    SwitchItem("Activado", Settings.aiModeEnabled) { Settings.aiModeEnabled = it }
+    SwitchItem("Usar imágenes seleccionadas", Settings.aiUseImages, "El recorte real se envía a Google") { Settings.aiUseImages = it }
+    SwitchItem("Usar para preguntas visuales", Settings.aiVisual, "Preguntas OCR que dependen de una figura") { Settings.aiVisual = it }
+    SwitchItem("Preferir AI Mode para imágenes", Settings.aiPreferImages) { Settings.aiPreferImages = it }
+    SwitchItem("Abrir resultados en Google", Settings.openInGoogle) { Settings.openInGoogle = it }
+    Text(
+        "No requiere clave API. Se usa la página de Google dentro de la app (tu sesión de Google, si inicias sesión en el navegador de la app). " +
+            "Si la subida automática de la imagen falla, «Abrir Google AI Mode» la abre con el recorte listo para el selector de archivos.",
+        fontSize = 13.sp, color = C.sub, modifier = Modifier.padding(16.dp)
+    )
 }
 
 // ---------------------------------------------------------------- Gemini

@@ -9,8 +9,6 @@ import java.io.ByteArrayOutputStream
 
 /** Cliente de Gemini (opcional). Usa la clave y la cuota del propio usuario. */
 object GeminiEngine {
-    private const val TITLE = "GEMINI"
-
     fun available() = Settings.geminiEnabled && SecureStore.hasGeminiKey()
 
     suspend fun ask(p: ParsedQuestion, image: Bitmap? = null): Block {
@@ -31,7 +29,7 @@ object GeminiEngine {
         append("Tipo detectado: ${p.type.label}\n")
         if (p.context.isNotBlank()) append("Contexto:\n${p.context.take(1500)}\n\n")
         if (p.hasImage) append("La imagen adjunta forma parte de la pregunta.\n")
-        append("Pregunta: ${p.question}\n")
+        append("Pregunta: ${p.question.ifBlank { "Analiza la imagen y responde con claridad." }}\n")
         if (p.options.isNotEmpty()) {
             append("Opciones:\n")
             p.options.forEach { append("${it.label}. ${it.text}\n") }
@@ -69,12 +67,12 @@ object GeminiEngine {
     private fun parse(raw: String, p: ParsedQuestion): Block {
         val clean = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val j = runCatching { JSONObject(clean) }.getOrNull()
-            ?: return Block(TITLE, answer = clean.take(400), confidence = 0.5)
+            ?: return Block(Origin.GEMINI, answer = clean.take(400), confidence = 0.5)
         val ch = j.optJSONArray("choice")
         val labels = (0 until (ch?.length() ?: 0)).map { ch!!.optString(it).trim().uppercase().take(1) }
             .filter { l -> p.options.any { it.label.equals(l, true) } }
         val answer = j.optString("answer").ifBlank { labels.firstNotNullOfOrNull { l -> p.options.firstOrNull { it.label == l }?.text }.orEmpty() }
-        return Block(TITLE, labels, answer, j.optString("explanation"), emptyList(), j.optDouble("confidence", 0.7).coerceIn(0.0, 1.0))
+        return Block(Origin.GEMINI, labels, answer, j.optString("explanation"), emptyList(), j.optDouble("confidence", 0.7).coerceIn(0.0, 1.0))
     }
 
     private fun toBase64(src: Bitmap): String {

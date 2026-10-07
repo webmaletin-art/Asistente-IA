@@ -12,7 +12,7 @@ sealed interface PanelState {
     data object None : PanelState
     data object Loading : PanelState
     data class Done(val result: AnalysisResult) : PanelState
-    data class Failed(val message: String, val needsGemini: Boolean) : PanelState
+    data class Failed(val message: String, val needsGemini: Boolean, val url: String? = null, val urlLabel: String? = null) : PanelState
 }
 
 /** Estado de UI compartido por el panel flotante y el navegador. */
@@ -32,7 +32,7 @@ class AssistState {
         } catch (e: CancellationException) {
             panel = PanelState.None; throw e
         } catch (e: AnalysisException) {
-            panel = PanelState.Failed(e.message ?: "Error", e.needsGemini); false
+            panel = PanelState.Failed(e.message ?: "Error", e.needsGemini, e.googleUrl, e.openLabel); false
         } catch (e: Exception) {
             panel = PanelState.Failed("No se pudo completar la consulta. Revisa tu conexión.", false); false
         }
