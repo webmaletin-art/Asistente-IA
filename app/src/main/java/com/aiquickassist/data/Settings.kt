@@ -88,6 +88,9 @@ object Settings {
     var historyEnabled by bool("historyEnabled", true)
 
     // Burbuja
+    var panelMode by enum("panelMode", PanelMode.LIGHT)
+    var panelOpacity by float("panelOpacity", 1f)
+    var panelColor by int("panelColor", 0xFFFFFFFF.toInt())
     var bubbleEnabled by bool("bubbleEnabled", false)
     var bubbleSizeDp by int("bubbleSizeDp", 52)
     var bubbleOpacity by float("bubbleOpacity", 0.9f)

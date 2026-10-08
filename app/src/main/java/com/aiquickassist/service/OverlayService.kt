@@ -24,6 +24,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.aiquickassist.MainActivity
 import com.aiquickassist.R
+import com.aiquickassist.capture.Camouflage
 import com.aiquickassist.capture.CropStore
 import com.aiquickassist.capture.HighlightDetector
 import com.aiquickassist.capture.Ocr
@@ -56,6 +57,7 @@ class OverlayService : Service() {
     private var testUi by mutableStateOf<TestUi?>(null)
     private var testView: View? = null
     private var testRun: TestRun? = null
+    private var closeView: android.widget.TextView? = null
     private var testHook: ((Bitmap, String) -> Unit)? = null
 
     private lateinit var bubble: BubbleView
@@ -101,7 +103,7 @@ class OverlayService : Service() {
         Bridge.onScroll = null
         if (::owner.isInitialized) {
             job?.cancel(); scope.cancel()
-            listOf(menuView, panelView, selectionView, testView).forEach { remove(it) }
+            listOf(menuView, panelView, selectionView, testView, closeView).forEach { remove(it) }
             if (::bubble.isInitialized) remove(bubble)
             owner.destroy()
         }
@@ -116,7 +118,14 @@ class OverlayService : Service() {
         val dm = resources.displayMetrics
         bubbleLp.x = if (Settings.bubbleX >= 0) Settings.bubbleX else dm.widthPixels - size
         bubbleLp.y = if (Settings.bubbleY >= 0) Settings.bubbleY else dm.heightPixels / 3
-        bubble = BubbleView(this, wm, bubbleLp, ::onTap, ::openMenu) { x, y -> Settings.bubbleX = x; Settings.bubbleY = y }
+        bubble = BubbleView(this, wm, bubbleLp, ::onTap, ::openMenu,
+            onMoved = { x, y -> Settings.bubbleX = x; Settings.bubbleY = y },
+            onDrag = { cx, cy -> showCloseTarget(); updateCloseTarget(cx, cy) },
+            onRelease = { cx, cy ->
+                val near = updateCloseTarget(cx, cy); hideCloseTarget()
+                if (near) { Settings.bubbleEnabled = false; stopSelf() }   // soltada sobre la ✕: se cierra sin abrir la app
+                near
+            })
         bubble.config = c
         wm.addView(bubble, bubbleLp)
     }
@@ -156,7 +165,7 @@ class OverlayService : Service() {
     private fun onTap() {
         when (bubble.status) {
             BubbleStatus.LOADING -> { job?.cancel(); resetIdle() }
-            BubbleStatus.DONE, BubbleStatus.ERROR -> if (showPanel) resetIdle() else showPanel = true
+            BubbleStatus.DONE, BubbleStatus.ERROR -> if (showPanel) resetIdle() else scope.launch { prepareCamo(); showPanel = true }
             BubbleStatus.IDLE -> runTool(Settings.defaultTool)
         }
     }
@@ -168,14 +177,14 @@ class OverlayService : Service() {
     private fun openMenu() {
         if (menuView != null) return
         val dm = resources.displayMetrics
-        val menuW = px(190); val menuH = px(7 * 48 + 8)
+        val menuW = px(190); val menuH = px(8 * 48 + 8)
         val size = bubbleLp.width
         val left = if (bubbleLp.x + size / 2 < dm.widthPixels / 2) bubbleLp.x + size else bubbleLp.x - menuW
         val top = minOf(bubbleLp.y, dm.heightPixels - menuH - px(24)).coerceAtLeast(px(24))
         val v = owner.compose(this) {
-            AppTheme {
+            AppTheme { PanelHost {
                 BubbleMenu(Settings.defaultTool, Settings.manualSearch, (left / density).dp, (top / density).dp, ::onMenu, ::closeMenu)
-            }
+            } }
         }
         menuView = v
         wm.addView(v, overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
@@ -190,8 +199,9 @@ class OverlayService : Service() {
             MenuAction.TEXT -> { Settings.defaultTool = Tool.TEXT; runTool(Tool.TEXT) }
             MenuAction.OCR -> { Settings.defaultTool = Tool.OCR; runTool(Tool.OCR) }
             MenuAction.IMAGE -> { Settings.defaultTool = Tool.IMAGE; runTool(Tool.IMAGE) }
-            MenuAction.SEARCH -> { showPanel = true; state.searchText = ""; state.searchOpen = true }
+            MenuAction.SEARCH -> scope.launch { prepareCamo(); showPanel = true; state.searchText = ""; state.searchOpen = true }
             MenuAction.BROWSER -> openApp("browser")
+            MenuAction.CAMO -> camouflageBubble()
             MenuAction.TEST -> startTest()
             MenuAction.SETTINGS -> openApp("settings")
         }
@@ -226,11 +236,12 @@ class OverlayService : Service() {
             if (parsed == null || size < 4) {
                 // Nunca se adivina la pregunta a partir de la página: se pide copiarla
                 state.panel = PanelState.Failed("No hay texto nuevo copiado. Selecciona la pregunta, toca «Copiar» y vuelve a tocar la burbuja.", false)
-                bubble.status = BubbleStatus.ERROR; showPanel = true
+                bubble.status = BubbleStatus.ERROR; prepareCamo(); showPanel = true
                 return@launch
             }
             val ok = state.run { Analyzer.analyze(parsed) }
             bubble.status = if (ok) BubbleStatus.DONE else BubbleStatus.ERROR
+            if (!ok || Settings.quickAnswer) prepareCamo()
             showPanel = !ok || Settings.quickAnswer
         }
     }
@@ -302,6 +313,7 @@ class OverlayService : Service() {
         job = scope.launch {
             val ok = state.run(block)
             bubble.status = if (ok) BubbleStatus.DONE else BubbleStatus.ERROR
+            if (!ok || Settings.quickAnswer) prepareCamo()
             showPanel = !ok || Settings.quickAnswer
         }
     }
@@ -357,6 +369,63 @@ class OverlayService : Service() {
         }
         return Analyzer.analyze(p, image)
     }
+
+    // ---------------- Camuflaje y objetivo ✕ ----------------
+    /** Una captura bajo demanda: color medio de la zona donde saldrá el panel (modo Camuflaje). */
+    private suspend fun prepareCamo() {
+        if (Settings.panelMode != PanelMode.CAMO) return
+        val c = screenColors { w, h, px -> Camouflage.average(px, w, h, 0, px(28), w, minOf(h, px(28) + px(170))) } ?: return
+        PanelStyle.camo = c
+    }
+
+    /** Camufla la burbuja: toma el color de lo que la rodea (una captura, solo al pulsar «Camuflar»). */
+    private fun camouflageBubble() {
+        scope.launch {
+            val size = bubbleLp.width; val bx = bubbleLp.x; val by = bubbleLp.y
+            val c = screenColors { w, h, px -> Camouflage.ring(px, w, h, bx, by, size, px(24)) }
+            if (c == null) { toast("No se pudo capturar la pantalla"); return@launch }
+            Settings.bubbleColor = c
+            toast("Burbuja camuflada con el color de fondo")
+        }
+    }
+
+    private suspend fun <T> screenColors(f: (Int, Int, IntArray) -> T): T? {
+        bubble.visibility = View.INVISIBLE
+        delay(130)
+        val shot = Bridge.capture()
+        if (!hidden) bubble.visibility = View.VISIBLE
+        shot ?: return null
+        val w = shot.width; val h = shot.height
+        val pxs = IntArray(w * h); shot.getPixels(pxs, 0, w, 0, 0, w, h)
+        return f(w, h, pxs)
+    }
+
+    private fun showCloseTarget() {
+        if (closeView != null) return
+        val d = px(64)
+        val tv = android.widget.TextView(this).apply {
+            text = "✕"; gravity = Gravity.CENTER; textSize = 22f; setTextColor(android.graphics.Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xCC000000.toInt()); setStroke(px(2), android.graphics.Color.WHITE)
+            }
+        }
+        val lp = overlayParams(d, d, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+        lp.y = px(56)
+        wm.addView(tv, lp); closeView = tv
+    }
+
+    /** true si el centro de la burbuja está sobre la ✕ (que se agranda como aviso). */
+    private fun updateCloseTarget(cx: Float, cy: Float): Boolean {
+        val v = closeView ?: return false
+        val dm = resources.displayMetrics
+        val tx = dm.widthPixels / 2f; val ty = dm.heightPixels - px(56) - px(32).toFloat()
+        val near = Math.hypot((cx - tx).toDouble(), (cy - ty).toDouble()) < px(80)
+        v.scaleX = if (near) 1.3f else 1f; v.scaleY = v.scaleX
+        return near
+    }
+
+    private fun hideCloseTarget() { remove(closeView); closeView = null }
 
     // ---------------- Modo test guiado ----------------
     private class TestRun {
@@ -511,7 +580,7 @@ class OverlayService : Service() {
         if (ui == null) { remove(testView); testView = null; return }
         if (testView != null) return
         val v = owner.compose(this) {
-            AppTheme { testUi?.let { TestBanner(it) } }
+            AppTheme { PanelHost { testUi?.let { TestBanner(it) } } }
         }
         testView = v
         val lp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -534,7 +603,7 @@ class OverlayService : Service() {
             return
         }
         val v = owner.compose(this) {
-            AppTheme {
+            AppTheme { PanelHost {
                 Column(Modifier.fillMaxWidth()) {
                     if (state.searchOpen) SearchBar(state.searchText, { state.searchText = it }, ::submitSearch, { state.searchOpen = false; if (state.panel !is PanelState.Done) resetIdle() })
                     ResultPanel(state.panel, onClose = ::resetIdle, onSearch = {
@@ -544,7 +613,7 @@ class OverlayService : Service() {
                         onAlternate = { toG -> (state.panel as? PanelState.Done)?.let { d -> scope.launch { state.alternate(d.result, toG) } } },
                         altBusy = state.altBusy)
                 }
-            }
+            } }
         }
         val lp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or (if (focusable) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE),

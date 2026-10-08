@@ -53,7 +53,7 @@ fun ResultPanel(
 
     Column(
         modifier.fillMaxWidth().padding(8.dp)
-            .border(1.dp, Color0, RoundedCornerShape(6.dp)).background(C.bg, RoundedCornerShape(6.dp))
+            .border(1.dp, PAL.line, RoundedCornerShape(6.dp)).background(PAL.bg, RoundedCornerShape(6.dp))
             .animateContentSize(androidx.compose.animation.core.tween(120))
             .pointerInput(state) {
                 detectVerticalDragGestures { _, dy -> if (dy < -12) expanded = true else if (dy > 12) expanded = false }
@@ -78,20 +78,19 @@ fun ResultPanel(
     }
 }
 
-private val Color0 = C.line
 
 @Composable
 private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit, onOpenGoogle: (String) -> Unit, onAlternate: ((Boolean) -> Unit)?, altBusy: Boolean) {
     val b = r.best
     val head = if (b.choice.isNotEmpty()) "✓ " + b.choice.joinToString(", ") else if (b.confidence > 0) "✓" else "?"
-    val headColor = if (b.choice.isNotEmpty() || b.confidence > 0) C.ok else C.sub
+    val headColor = if (b.choice.isNotEmpty() || b.confidence > 0) C.ok else PAL.sub
     val uri = LocalUriHandler.current
 
     Row(Modifier.fillMaxWidth().clickable(onClick = toggle).padding(start = 14.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(head, color = headColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text(b.origin.label, fontSize = 12.sp, color = C.sub)
+            Text(b.origin.label, fontSize = 12.sp, color = PAL.sub)
             if (!expanded) Text(b.answer.ifBlank { r.note.orEmpty() }, fontSize = 15.sp, maxLines = 3)
         }
         if (onAlternate != null && !(r.google != null && r.gemini != null)) {
@@ -110,10 +109,10 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
     if (!expanded) return
 
     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp).padding(bottom = 14.dp)) {
-        HorizontalDivider(color = C.line)
+        HorizontalDivider(color = PAL.line)
         Label("Pregunta"); Text(r.parsed.question.ifBlank { "—" }, fontSize = 15.sp)
-        if (r.parsed.options.isNotEmpty()) r.parsed.options.forEach { Text("${it.label}. ${it.text}", fontSize = 14.sp, color = C.sub) }
-        Text("Tipo: ${r.parsed.type.label} · Motor: ${r.engineLabel}", fontSize = 12.sp, color = C.sub)
+        if (r.parsed.options.isNotEmpty()) r.parsed.options.forEach { Text("${it.label}. ${it.text}", fontSize = 14.sp, color = PAL.sub) }
+        Text("Tipo: ${r.parsed.type.label} · Motor: ${r.engineLabel}", fontSize = 12.sp, color = PAL.sub)
 
         Label("Respuesta")
         Text((b.choice.joinToString(", ").let { if (it.isNotEmpty()) "$it. " else "" }) + b.answer, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -138,24 +137,24 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
 @Composable
 private fun MiniBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.padding(end = 4.dp).border(1.dp, C.line, RoundedCornerShape(4.dp))
+        Modifier.padding(end = 4.dp).border(1.dp, PAL.line, RoundedCornerShape(4.dp))
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 7.dp, vertical = 3.dp)
-    ) { Text(label, fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium) }
+    ) { Text(label, fontSize = 12.sp, color = PAL.sub, fontWeight = FontWeight.Medium) }
 }
 
 @Composable
 private fun EngineBlock(title: String, b: Block) {
-    Text("$title:", fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp))
+    Text("$title:", fontSize = 12.sp, color = PAL.sub, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp))
     run {
         Text((b.choice.joinToString(", ").let { if (it.isNotEmpty()) "$it. " else "" }) + b.answer, fontSize = 14.sp)
-        if (b.explanation.isNotBlank() && b.explanation != b.answer) Text(b.explanation.take(900), fontSize = 13.sp, color = C.sub)
+        if (b.explanation.isNotBlank() && b.explanation != b.answer) Text(b.explanation.take(900), fontSize = 13.sp, color = PAL.sub)
         val uri = LocalUriHandler.current
         b.sources.filter { it.url.isNotBlank() }.take(3).forEach { Text(it.title, fontSize = 12.sp, color = C.blue, modifier = Modifier.clickable { runCatching { uri.openUri(it.url) } }) }
     }
 }
 
 @Composable
-private fun Label(t: String) = Text(t.uppercase(), fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+private fun Label(t: String) = Text(t.uppercase(), fontSize = 12.sp, color = PAL.sub, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
 
 /** Barra de búsqueda manual: oculta salvo cuando se toca la lupa. */
 @Composable
@@ -163,16 +162,17 @@ fun SearchBar(text: String, onText: (String) -> Unit, onSubmit: () -> Unit, onCl
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Row(
-        modifier.fillMaxWidth().padding(8.dp).border(1.dp, C.line, RoundedCornerShape(6.dp)).background(C.bg, RoundedCornerShape(6.dp)),
+        modifier.fillMaxWidth().padding(8.dp).border(1.dp, PAL.line, RoundedCornerShape(6.dp)).background(PAL.bg, RoundedCornerShape(6.dp)),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
-        Icon(Icons.Default.Search, null, tint = C.sub)
+        Icon(Icons.Default.Search, null, tint = PAL.sub)
         TextField(
             value = text, onValueChange = onText, modifier = Modifier.weight(1f).focusRequester(focus),
             placeholder = { Text("¿Qué quieres saber?") }, singleLine = true,
-            colors = TextFieldDefaults.colors(focusedContainerColor = C.bg, unfocusedContainerColor = C.bg,
-                focusedIndicatorColor = C.bg, unfocusedIndicatorColor = C.bg),
+            colors = TextFieldDefaults.colors(focusedContainerColor = PAL.bg, unfocusedContainerColor = PAL.bg,
+                focusedIndicatorColor = PAL.bg, unfocusedIndicatorColor = PAL.bg,
+                focusedTextColor = PAL.fg, unfocusedTextColor = PAL.fg),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { if (text.isNotBlank()) onSubmit() })
         )

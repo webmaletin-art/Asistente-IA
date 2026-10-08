@@ -204,7 +204,7 @@ fun BrowserScreen(nav: Nav) {
                     update = { tab.canBack = it.canGoBack(); tab.canForward = it.canGoForward() }
                 )
             }
-            Column(Modifier.align(Alignment.TopCenter)) {
+            PanelHost { Column(Modifier.align(Alignment.TopCenter)) {
                 if (assist.searchOpen) SearchBar(assist.searchText, { assist.searchText = it }, {
                     val q = assist.searchText.trim(); assist.searchOpen = false
                     scope.launch { assist.run { Analyzer.search(q) } }
@@ -216,7 +216,7 @@ fun BrowserScreen(nav: Nav) {
                     onOpenGoogle = { u -> assist.panel = PanelState.None; tab.url = u; tab.web?.loadUrl(u) },
                     onAlternate = { toG -> (assist.panel as? PanelState.Done)?.let { d -> scope.launch { assist.alternate(d.result, toG) } } },
                     altBusy = assist.altBusy)
-            }
+            } }
         }
     }
 }

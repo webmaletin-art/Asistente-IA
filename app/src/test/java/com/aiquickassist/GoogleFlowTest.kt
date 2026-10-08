@@ -166,3 +166,14 @@ class CopyFlowTest {
         assertTrue(Analyzer.annotate(mc, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "Madrid y París son capitales.")).choice.isEmpty())
     }
 }
+
+class CamouflageTest {
+    @Test fun averageAndRing() {
+        val w = 100; val h = 100
+        val px = IntArray(w * h) { 0xFF102030.toInt() }           // fondo oscuro azulado
+        for (y in 40 until 60) for (x in 40 until 60) px[y * w + x] = 0xFFFFFFFF.toInt()   // «burbuja» blanca en el centro
+        assertEquals(0xFF102030.toInt(), com.aiquickassist.capture.Camouflage.average(px, w, h, 0, 0, 30, 30))
+        assertEquals(0xFF102030.toInt(), com.aiquickassist.capture.Camouflage.ring(px, w, h, 40, 40, 20, 10))   // ignora la burbuja
+        assertEquals(0xFFFFFFFF.toInt(), com.aiquickassist.capture.Camouflage.average(IntArray(0), 0, 0, 0, 0, 5, 5))
+    }
+}

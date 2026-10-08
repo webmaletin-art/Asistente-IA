@@ -85,7 +85,7 @@ fun BubblePreview(style: BubbleStyle, color: Int, opacity: Float, sizeDp: Int, s
 }
 
 @Composable
-private fun ColorDialog(initial: Int, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
+internal fun ColorDialog(initial: Int, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
     var r by remember { mutableFloatStateOf(android.graphics.Color.red(initial).toFloat()) }
     var g by remember { mutableFloatStateOf(android.graphics.Color.green(initial).toFloat()) }
     var b by remember { mutableFloatStateOf(android.graphics.Color.blue(initial).toFloat()) }
@@ -105,4 +105,34 @@ private fun ColorDialog(initial: Int, onDismiss: () -> Unit, onPick: (Int) -> Un
         confirmButton = { TextButton(onClick = { onPick(argb) }) { Text("Aplicar", color = Color.Black) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Color.Black) } }
     )
+}
+
+/** Transparencia y color del panel de respuesta (y del menú / búsqueda / guía del test). */
+@Composable
+fun PanelSettingsScreen(nav: Nav) {
+    var custom by remember { mutableStateOf(false) }
+    Screen("Panel de respuesta", nav::back) {
+        // Vista previa (sobre un fondo a cuadros para ver la transparencia)
+        Box(Modifier.fillMaxWidth().padding(16.dp).height(120.dp).background(Color(0xFF6A8FBF), androidx.compose.foundation.shape.RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center) {
+            val pal = PanelStyle.current()
+            Column(Modifier.padding(16.dp).fillMaxWidth().background(pal.bg, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                .border(1.dp, pal.line, androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).padding(12.dp)) {
+                Text("✓ B", fontSize = 22.sp, color = C.ok, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text("Vehículo motorizado", fontSize = 15.sp, color = pal.fg)
+            }
+        }
+        Section("Transparencia")
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            Text("${(Settings.panelOpacity * 100).toInt()}%", fontSize = 13.sp, color = C.sub)
+            Slider(Settings.panelOpacity, { Settings.panelOpacity = it }, valueRange = 0.2f..1f, colors = sliderColors())
+        }
+        Section("Color")
+        com.aiquickassist.data.PanelMode.entries.forEach { m ->
+            RadioItem(m.label, Settings.panelMode == m, if (m == com.aiquickassist.data.PanelMode.CAMO) "Toma el color medio de lo que hay detrás con una captura al mostrar la respuesta; si es oscuro se vuelve oscuro, si es blanco, blanco" else null) { Settings.panelMode = m }
+        }
+        if (Settings.panelMode == com.aiquickassist.data.PanelMode.CUSTOM) WireButton("Elegir color", Modifier.padding(16.dp)) { custom = true }
+        Text("La burbuja se camufla aparte: mantén pulsada la burbuja → «Camuflar burbuja».", fontSize = 12.sp, color = C.sub, modifier = Modifier.padding(16.dp))
+    }
+    if (custom) ColorDialog(Settings.panelColor, { custom = false }) { Settings.panelColor = it; custom = false }
 }

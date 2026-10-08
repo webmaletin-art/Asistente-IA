@@ -110,6 +110,7 @@ fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
     Item("Color", onClick = { nav.go("bubble") })
     Item("Estilo", Settings.bubbleStyle.label, onClick = { nav.go("bubble") })
     Item("Modo discreto", if (Settings.discreet) "Sí" else "No", onClick = { nav.go("bubble") })
+    Item("Panel de respuesta", Settings.panelMode.label.substringBefore(" ("), onClick = { nav.go("panel") })
 
     Section("Comportamiento")
     SwitchItem("Texto: usar lo que copies", Settings.useClipboard, "Copias la pregunta, tocas la burbuja y se busca la respuesta. Cada copia se usa una sola vez") { Settings.useClipboard = it }

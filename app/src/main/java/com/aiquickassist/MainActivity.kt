@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
                     "googleai" -> GoogleAiScreen(nav)
                     "testreport" -> TestReportScreen(nav)
                     "bubble" -> BubbleSettingsScreen(nav)
+                    "panel" -> PanelSettingsScreen(nav)
                     "history" -> HistoryScreen(nav)
                     "permissions" -> PermissionsScreen(nav)
                     "privacy" -> PrivacyScreen(nav)

@@ -7,6 +7,10 @@ enum class EngineMode(val label: String) {
     BOTH("Mejor respuesta — ambos")
 }
 
+enum class PanelMode(val label: String) {
+    LIGHT("Claro"), DARK("Oscuro"), CAMO("Camuflaje (copia los colores de detrás)"), CUSTOM("Color personalizado")
+}
+
 enum class Tool(val label: String, val glyph: String) {
     TEXT("Texto", "T"),
     OCR("OCR", "▣"),

@@ -16,7 +16,11 @@ class BubbleView(
     private val lp: WindowManager.LayoutParams,
     private val onTap: () -> Unit,
     private val onLongPress: () -> Unit,
-    private val onMoved: (Int, Int) -> Unit
+    private val onMoved: (Int, Int) -> Unit,
+    /** Centro de la burbuja mientras se arrastra (para el objetivo ✕). */
+    private val onDrag: (Float, Float) -> Unit = { _, _ -> },
+    /** Al soltar tras arrastrar: devuelve true si se cerró (soltada sobre la ✕). */
+    private val onRelease: (Float, Float) -> Boolean = { _, _ -> false }
 ) : View(context) {
     var config: BubbleConfig? = null
         set(v) { field = v; invalidate() }
@@ -50,11 +54,12 @@ class BubbleView(
                 if (moved && !longFired) {
                     lp.x = (startX + dx).toInt(); lp.y = (startY + dy).toInt()
                     runCatching { wm.updateViewLayout(this, lp) }
+                    onDrag(lp.x + width / 2f, lp.y + height / 2f)
                 }
             }
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longRunnable)
-                if (moved) onMoved(lp.x, lp.y) else if (!longFired) onTap()
+                if (moved) { if (!onRelease(lp.x + width / 2f, lp.y + height / 2f)) onMoved(lp.x, lp.y) } else if (!longFired) onTap()
             }
             MotionEvent.ACTION_CANCEL -> removeCallbacks(longRunnable)
         }
