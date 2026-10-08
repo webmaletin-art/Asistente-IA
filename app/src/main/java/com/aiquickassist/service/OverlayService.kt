@@ -196,15 +196,21 @@ class OverlayService : Service() {
     private fun onMenu(a: MenuAction) {
         closeMenu()
         when (a) {
-            MenuAction.TEXT -> { Settings.defaultTool = Tool.TEXT; runTool(Tool.TEXT) }
-            MenuAction.OCR -> { Settings.defaultTool = Tool.OCR; runTool(Tool.OCR) }
-            MenuAction.IMAGE -> { Settings.defaultTool = Tool.IMAGE; runTool(Tool.IMAGE) }
+            MenuAction.TEXT -> chooseTool(Tool.TEXT)
+            MenuAction.OCR -> chooseTool(Tool.OCR)
+            MenuAction.IMAGE -> chooseTool(Tool.IMAGE)
             MenuAction.SEARCH -> scope.launch { prepareCamo(); showPanel = true; state.searchText = ""; state.searchOpen = true }
             MenuAction.BROWSER -> openApp("browser")
             MenuAction.CAMO -> camouflageBubble()
             MenuAction.TEST -> startTest()
             MenuAction.SETTINGS -> openApp("settings")
         }
+    }
+
+    /** Elegir un modo solo lo deja seleccionado: no hace nada hasta que se vuelva a tocar la burbuja. */
+    private fun chooseTool(t: Tool) {
+        Settings.defaultTool = t
+        toast("Modo: ${t.label}. Toca la burbuja para usarlo")
     }
 
     private fun openApp(route: String, url: String? = null) {
