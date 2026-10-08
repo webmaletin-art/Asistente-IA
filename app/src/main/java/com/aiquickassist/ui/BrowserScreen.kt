@@ -213,7 +213,9 @@ fun BrowserScreen(nav: Nav) {
                 ResultPanel(assist.panel, onClose = { assist.panel = PanelState.None }, onSearch = {
                     assist.searchText = (assist.panel as? PanelState.Done)?.result?.parsed?.question.orEmpty(); assist.searchOpen = true
                 }, onConfigureGemini = { assist.panel = PanelState.None; nav.go("gemini") },
-                    onOpenGoogle = { u -> assist.panel = PanelState.None; tab.url = u; tab.web?.loadUrl(u) })
+                    onOpenGoogle = { u -> assist.panel = PanelState.None; tab.url = u; tab.web?.loadUrl(u) },
+                    onAlternate = { toG -> (assist.panel as? PanelState.Done)?.let { d -> scope.launch { assist.alternate(d.result, toG) } } },
+                    altBusy = assist.altBusy)
             }
         }
     }

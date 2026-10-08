@@ -540,7 +540,9 @@ class OverlayService : Service() {
                     ResultPanel(state.panel, onClose = ::resetIdle, onSearch = {
                         val d = state.panel as? PanelState.Done
                         state.searchText = d?.result?.parsed?.question.orEmpty(); state.searchOpen = true
-                    }, onConfigureGemini = { resetIdle(); openApp("gemini") }, onOpenGoogle = { u -> resetIdle(); openApp("browser", u) })
+                    }, onConfigureGemini = { resetIdle(); openApp("gemini") }, onOpenGoogle = { u -> resetIdle(); openApp("browser", u) },
+                        onAlternate = { toG -> (state.panel as? PanelState.Done)?.let { d -> scope.launch { state.alternate(d.result, toG) } } },
+                        altBusy = state.altBusy)
                 }
             }
         }

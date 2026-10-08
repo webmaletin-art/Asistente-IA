@@ -18,6 +18,28 @@ object Analyzer {
         override fun removeEldestEntry(e: MutableMap.MutableEntry<String, AnalysisResult>?) = size > 40
     }
 
+    /** Último recorte enviado: permite repetir la consulta con otro motor sin volver a marcar la imagen. */
+    @Volatile var lastCrop: CropImage? = null
+
+    /**
+     * Segunda opinión bajo demanda: [toGemini] = true pregunta a Gemini (gasta cuota de tu clave solo al pulsar);
+     * false pregunta a Google AI Mode (sin créditos). Conserva el resultado anterior como bloque.
+     */
+    suspend fun alternate(r: AnalysisResult, toGemini: Boolean): AnalysisResult {
+        val p = r.parsed
+        val img = if (r.withImage) lastCrop else null
+        if (r.withImage && img == null) throw AnalysisException("La imagen ya no está disponible; vuelve a marcarla.")
+        return if (toGemini) {
+            val g = GeminiEngine.ask(p.copy(hasImage = img != null), img?.bitmap)
+            r.copy(best = g, gemini = g, note = null)
+        } else {
+            if (!Settings.aiModeEnabled) throw AnalysisException("Google AI Mode está desactivado (Configuración → Google AI Mode).")
+            val a = if (img != null) GoogleEngine.aiMode(p.question, img.uri) else GoogleEngine.aiMode(GoogleText.queryFor(p), null)
+            val b = annotate(p, a.block)
+            r.copy(best = b, google = b, googleUrl = a.url, note = null)
+        }
+    }
+
     fun clearCache() = synchronized(cache) { cache.clear() }
 
     /** Consulta manual (lupa): se interpreta como cualquier otra pregunta. */
@@ -27,6 +49,7 @@ object Analyzer {
     }
 
     suspend fun analyze(p: ParsedQuestion, image: CropImage? = null, manual: Boolean = false): AnalysisResult {
+        if (image != null) lastCrop = image
         val mode = Settings.engineMode
         val key = "$mode|${p.type}|${p.question}|${p.options}|${p.context.take(80)}"
         if (image == null) synchronized(cache) { cache[key] }?.let { return it.copy(manual = manual) }

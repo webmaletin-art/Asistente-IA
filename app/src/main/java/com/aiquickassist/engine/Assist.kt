@@ -20,6 +20,19 @@ class AssistState {
     var panel by mutableStateOf<PanelState>(PanelState.None)
     var searchOpen by mutableStateOf(false)
     var searchText by mutableStateOf("")
+    var altBusy by mutableStateOf(false)
+
+    /** Pide una segunda opinión (Gemini o AI Mode). Si falla, se conserva la respuesta actual con un aviso. */
+    suspend fun alternate(r: AnalysisResult, toGemini: Boolean) {
+        altBusy = true
+        try {
+            panel = PanelState.Done(Analyzer.alternate(r, toGemini))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            panel = PanelState.Done(r.copy(note = (if (toGemini) "Gemini: " else "AI Mode: ") + (e.message ?: "no respondió")))
+        } finally { altBusy = false }
+    }
 
     /** Ejecuta un análisis, actualiza el panel y guarda en historial. Devuelve true si tuvo éxito. */
     suspend fun run(block: suspend () -> AnalysisResult): Boolean {

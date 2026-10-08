@@ -39,14 +39,16 @@ fun ResultPanel(
     onSearch: () -> Unit,
     onConfigureGemini: () -> Unit,
     onOpenGoogle: (String) -> Unit,
+    onAlternate: ((Boolean) -> Unit)? = null,
+    altBusy: Boolean = false,
     modifier: Modifier = Modifier,
     maxHeight: androidx.compose.ui.unit.Dp = 520.dp
 ) {
     if (state is PanelState.None || state is PanelState.Loading) return
     var expanded by remember(state) { mutableStateOf(false) }
 
-    if (state is PanelState.Done && Settings.autoClose && !expanded) {
-        LaunchedEffect(state, expanded) { delay(Settings.autoCloseSeconds * 1000L); onClose() }
+    if (state is PanelState.Done && Settings.autoClose && !expanded && !altBusy) {
+        LaunchedEffect(state, expanded, altBusy) { delay(Settings.autoCloseSeconds * 1000L); onClose() }
     }
 
     Column(
@@ -70,7 +72,7 @@ fun ResultPanel(
                     if (state.url != null) WireButton(state.urlLabel ?: "Ver resultados de Google") { onOpenGoogle(state.url) }
                 }
             }
-            is PanelState.Done -> DoneContent(state.result, expanded, { expanded = !expanded }, onClose, onSearch, onOpenGoogle)
+            is PanelState.Done -> DoneContent(state.result, expanded, { expanded = !expanded }, onClose, onSearch, onOpenGoogle, onAlternate, altBusy)
             else -> {}
         }
     }
@@ -79,7 +81,7 @@ fun ResultPanel(
 private val Color0 = C.line
 
 @Composable
-private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit, onOpenGoogle: (String) -> Unit) {
+private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit, onOpenGoogle: (String) -> Unit, onAlternate: ((Boolean) -> Unit)?, altBusy: Boolean) {
     val b = r.best
     val head = if (b.choice.isNotEmpty()) "✓ " + b.choice.joinToString(", ") else if (b.confidence > 0) "✓" else "?"
     val headColor = if (b.choice.isNotEmpty() || b.confidence > 0) C.ok else C.sub
@@ -91,6 +93,12 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
             Text(head, color = headColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text(b.origin.label, fontSize = 12.sp, color = C.sub)
             if (!expanded) Text(b.answer.ifBlank { r.note.orEmpty() }, fontSize = 15.sp, maxLines = 3)
+        }
+        if (onAlternate != null && !(r.google != null && r.gemini != null)) {
+            val o = r.best.origin
+            // Segunda opinión, solo si hace falta: «G» = Gemini (usa tu cuota) · «AI» = Google AI Mode (sin créditos)
+            if (o == Origin.GOOGLE_AI_OVERVIEW || o == Origin.GOOGLE_AI_MODE) MiniBtn(if (altBusy) "…" else "G", !altBusy) { onAlternate(true) }
+            if (o == Origin.GEMINI || o == Origin.GOOGLE_AI_OVERVIEW) MiniBtn(if (altBusy) "…" else "AI", !altBusy) { onAlternate(false) }
         }
         if (Settings.manualSearch) IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Buscar") }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar") }
@@ -125,6 +133,14 @@ private fun DoneContent(r: AnalysisResult, expanded: Boolean, toggle: () -> Unit
             }
         }
     }
+}
+
+@Composable
+private fun MiniBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(end = 4.dp).border(1.dp, C.line, RoundedCornerShape(4.dp))
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 7.dp, vertical = 3.dp)
+    ) { Text(label, fontSize = 12.sp, color = C.sub, fontWeight = FontWeight.Medium) }
 }
 
 @Composable
