@@ -25,6 +25,13 @@ object GoogleText {
         return q.take(300)
     }
 
+    /** Afirmación sin «verdadero/falso» ni «?»: se busca como «¿Es verdad que …?». */
+    fun queryFor(p: ParsedQuestion): String {
+        val q = query(p)
+        return if (p.type == QType.TRUE_FALSE && !p.question.contains('?') && !Regex("verdader|falso|true or false", RegexOption.IGNORE_CASE).containsMatchIn(p.question))
+            "¿Es verdad que ${p.question.trim().trimEnd('.', ' ')}?" else q
+    }
+
     fun searchUrl(q: String) = "https://www.google.com/search?hl=es&q=${enc(q)}"
     fun aiModeUrl(q: String) = "https://www.google.com/search?udm=50&hl=es" + if (q.isBlank()) "" else "&q=${enc(q)}"
 

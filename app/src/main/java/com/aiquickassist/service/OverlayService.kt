@@ -219,16 +219,15 @@ class OverlayService : Service() {
         job?.cancel()
         bubble.status = BubbleStatus.LOADING
         job = scope.launch {
-            val snap = Bridge.readScreen()
-            // Selección en vivo (evento) → selección del árbol → texto visible
-            val picked = Bridge.liveSelection() ?: snap?.selected ?: freshClipboard() ?: highlightSelection()
+            // 1) texto que el usuario copió (se usa una sola vez por copia)  2) selección que entregue el sistema
+            val picked = clipboardWithFocus()?.let { acceptClip(it) } ?: Bridge.liveSelection() ?: Bridge.readScreen()?.selected
             val parsed = picked?.let { QuestionParser.parseText(it) }
-                ?: snap?.let { QuestionParser.parse(it.lines, resources.displayMetrics.heightPixels / 2) }
             val size = (parsed?.question?.length ?: 0) + (parsed?.options?.sumOf { it.text.length } ?: 0)
-            if (parsed == null || size < 8) {
-                bubble.status = BubbleStatus.IDLE
-                toast("No hay texto disponible: usando OCR")
-                startSelection(Tool.OCR); return@launch
+            if (parsed == null || size < 4) {
+                // Nunca se adivina la pregunta a partir de la página: se pide copiarla
+                state.panel = PanelState.Failed("No hay texto nuevo copiado. Selecciona la pregunta, toca «Copiar» y vuelve a tocar la burbuja.", false)
+                bubble.status = BubbleStatus.ERROR; showPanel = true
+                return@launch
             }
             val ok = state.run { Analyzer.analyze(parsed) }
             bubble.status = if (ok) BubbleStatus.DONE else BubbleStatus.ERROR
@@ -247,12 +246,34 @@ class OverlayService : Service() {
      * Opcional: texto que el usuario copió a mano hace menos de 60 s (y que aún no se usó).
      * No se copia nada automáticamente; solo se lee lo que ya está en el portapapeles.
      */
-    private fun freshClipboard(): String? {
+    private fun acceptClip(c: Pair<String, Long>): String? {
         if (!Settings.useClipboard) return null
-        val (text, stamp) = Bridge.clipboard() ?: return null
-        if (stamp <= lastClipStamp || System.currentTimeMillis() - stamp > 60_000L) return null
+        val (text, stamp) = c
+        if (stamp <= lastClipStamp || System.currentTimeMillis() - stamp > 10 * 60_000L) return null
         lastClipStamp = stamp
         return text
+    }
+
+    /**
+     * Android solo deja leer el portapapeles a la app que tiene el foco. Al tocar la burbuja se le da el foco
+     * a su ventana unos instantes (sin teclado), se lee lo que el usuario copió y se devuelve el foco.
+     */
+    private suspend fun clipboardWithFocus(): Pair<String, Long>? {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        fun read(): Pair<String, Long>? = runCatching {
+            val c = cm.primaryClip ?: return null
+            val t = c.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()?.takeIf { it.isNotBlank() } ?: return null
+            t to c.description.timestamp
+        }.getOrNull()
+        val flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        val had = (bubbleLp.flags and flag) != 0
+        if (had) { bubbleLp.flags = bubbleLp.flags and flag.inv(); runCatching { wm.updateViewLayout(bubble, bubbleLp) } }
+        try {
+            for (i in 0 until 8) { delay(60); if (bubble.hasWindowFocus()) return read() }
+            return read() ?: Bridge.clipboard()
+        } finally {
+            if (had) { bubbleLp.flags = bubbleLp.flags or flag; runCatching { wm.updateViewLayout(bubble, bubbleLp) } }
+        }
     }
 
     private suspend fun highlightSelection(): String? {
@@ -317,7 +338,7 @@ class OverlayService : Service() {
     private val visualRef = Regex("""esta imagen|siguiente imagen|figura|gr[aá]fico|diagrama|tri[aá]ngulo|c[ií]rculo|dibujo|this image|the image|diagram|figure|shown (above|below)""", RegexOption.IGNORE_CASE)
 
     /**
-     * OCR = región → TEXTO → Google Search (el OCR no cambia).
+     * OCR = región → TEXTO → motor elegido (nunca envía la imagen).
      * IMAGEN = región → RECORTE REAL (archivo + Uri) → Google AI Mode / Gemini. El OCR solo aporta
      * texto auxiliar; la imagen siempre viaja.
      */
@@ -326,8 +347,7 @@ class OverlayService : Service() {
         val parsed = QuestionParser.parseText(text, ocr = true)
         if (tool == Tool.OCR) {
             if (parsed == null) throw AnalysisException("No se detectó texto en la selección. Prueba el modo Imagen.")
-            val visual = visualRef.containsMatchIn(text) && Settings.aiVisual && Settings.aiModeEnabled && Settings.engineMode != EngineMode.GEMINI
-            return if (visual) Analyzer.analyze(parsed, CropImage(crop, CropStore.save(this, crop))) else Analyzer.analyze(parsed)
+            return Analyzer.analyze(parsed)          // OCR = solo texto: nunca se envía la imagen (Imagen es otra herramienta)
         }
         val image = CropImage(crop, CropStore.save(this, crop))
         val p = when {
@@ -359,7 +379,7 @@ class OverlayService : Service() {
     private fun testStageText() {
         val r = testRun ?: return
         testUi = TestUi("Test · pregunta ${r.round} de ${r.rounds} · paso 1: TEXTO",
-            "Marca con el dedo el texto de UNA pregunta y pulsa «Leer texto» sin tocar nada más. (Para probar el portapapeles: marca, toca «Copiar» en Chrome y luego «Leer texto».)",
+            "Marca el texto de UNA pregunta, toca «Copiar» en Chrome y luego pulsa «Leer texto».",
             listOf("Leer texto" to { testReadText() }, "Terminar" to { testFinish() }))
     }
 
@@ -370,8 +390,8 @@ class OverlayService : Service() {
             val t0 = System.currentTimeMillis()
             val live = Bridge.liveSelection()
             val snap = Bridge.readScreen()
-            val clip = Bridge.clipboard()
-            val clipText = if (live == null && snap?.selected == null) freshClipboard() else null
+            val clip = clipboardWithFocus()
+            val clipText = clip?.let { acceptClip(it) }
             val hi = if (live == null && snap?.selected == null && clipText == null) highlightSelection() else null
             val ms = System.currentTimeMillis() - t0
             val sb = r.sb
@@ -394,8 +414,8 @@ class OverlayService : Service() {
             sb.appendLine("Detección desde selección en vivo: ${TestProbe.parsed(pLive)}")
             sb.appendLine("Detección desde selección del árbol: ${TestProbe.parsed(pNode)}")
             sb.appendLine("Detección desde texto visible: ${TestProbe.parsed(pVis)}")
-            r.textQ = pLive ?: pNode ?: pClip ?: pHi ?: pVis
-            sb.appendLine("→ Fuente usada para el análisis: ${if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pClip != null) "portapapeles" else if (pHi != null) "resaltado (captura+OCR)" else if (pVis != null) "texto visible" else "ninguna"}")
+            r.textQ = pClip ?: pLive ?: pNode ?: pHi ?: pVis
+            sb.appendLine("→ Fuente usada para el análisis: ${if (pClip != null) "portapapeles (copiado)" else if (pLive != null) "selección en vivo" else if (pNode != null) "selección del árbol" else if (pHi != null) "resaltado (captura+OCR)" else if (pVis != null) "texto visible" else "ninguna"}")
             sb.appendLine()
             testStageOcr()
         }
@@ -435,14 +455,14 @@ class OverlayService : Service() {
             sb.appendLine("──────── RONDA ${r.round} · MOTORES ────────")
             if (q == null) sb.appendLine("Sin pregunta detectada: no se probaron motores.")
             else {
-                sb.appendLine("Consulta enviada a Google: «${GoogleText.query(q)}»")
-                sb.appendLine(TestProbe.probe("Visión general de Google", true) { GoogleEngine.overview(GoogleText.query(q)).block })
-                sb.appendLine(TestProbe.probe("Google AI Mode (texto)", true) { GoogleEngine.aiMode(GoogleText.query(q), null).block })
+                sb.appendLine("Consulta enviada a Google: «${GoogleText.queryFor(q)}»")
+                sb.appendLine(TestProbe.probe("Visión general de Google", true) { GoogleEngine.overview(GoogleText.queryFor(q)).block })
+                sb.appendLine(TestProbe.probe("Google AI Mode (texto)", true) { GoogleEngine.aiMode(GoogleText.queryFor(q), null).block })
                 sb.appendLine(TestProbe.probe("Gemini (texto)", false) { GeminiEngine.ask(q) })
                 val oq = r.ocrQ
-                if (oq != null && r.textQ != null && GoogleText.query(oq) != GoogleText.query(q)) {
-                    sb.appendLine("La pregunta del OCR difiere de la de texto: «${GoogleText.query(oq)}»")
-                    sb.appendLine(TestProbe.probe("Visión general (consulta del OCR)", true) { GoogleEngine.overview(GoogleText.query(oq)).block })
+                if (oq != null && r.textQ != null && GoogleText.queryFor(oq) != GoogleText.queryFor(q)) {
+                    sb.appendLine("La pregunta del OCR difiere de la de texto: «${GoogleText.queryFor(oq)}»")
+                    sb.appendLine(TestProbe.probe("Visión general (consulta del OCR)", true) { GoogleEngine.overview(GoogleText.queryFor(oq)).block })
                 }
             }
             sb.appendLine()

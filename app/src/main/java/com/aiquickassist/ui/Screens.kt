@@ -112,8 +112,7 @@ fun SettingsScreen(nav: Nav) = Screen("Configuración", nav::back) {
     Item("Modo discreto", if (Settings.discreet) "Sí" else "No", onClick = { nav.go("bubble") })
 
     Section("Comportamiento")
-    SwitchItem("Usar texto que copies a mano", Settings.useClipboard, "Si copias (Copiar) y tocas la burbuja en menos de 60 s, se usa ese texto. No se copia nada solo") { Settings.useClipboard = it }
-    SwitchItem("Detectar selección por resaltado", Settings.detectHighlight, "Si el texto marcado no llega por accesibilidad, se localiza el resaltado en una captura y se lee con OCR") { Settings.detectHighlight = it }
+    SwitchItem("Texto: usar lo que copies", Settings.useClipboard, "Copias la pregunta, tocas la burbuja y se busca la respuesta. Cada copia se usa una sola vez") { Settings.useClipboard = it }
     SwitchItem("Respuesta rápida", Settings.quickAnswer, "Mostrar la respuesta al terminar") { Settings.quickAnswer = it }
     SwitchItem("Mostrar explicación", Settings.showExplanation) { Settings.showExplanation = it }
     SwitchItem("Mostrar fuentes", Settings.showSources) { Settings.showSources = it }
@@ -169,7 +168,6 @@ fun WebEngineScreen(nav: Nav) = Screen("Visión general de Google", nav::back) {
 fun GoogleAiScreen(nav: Nav) = Screen("Google AI Mode", nav::back) {
     SwitchItem("Activado", Settings.aiModeEnabled) { Settings.aiModeEnabled = it }
     SwitchItem("Usar imágenes seleccionadas", Settings.aiUseImages, "El recorte real se envía a Google") { Settings.aiUseImages = it }
-    SwitchItem("Usar para preguntas visuales", Settings.aiVisual, "Preguntas OCR que dependen de una figura") { Settings.aiVisual = it }
     SwitchItem("Preferir AI Mode para imágenes", Settings.aiPreferImages) { Settings.aiPreferImages = it }
     SwitchItem("Abrir resultados en Google", Settings.openInGoogle) { Settings.openInGoogle = it }
     Text(

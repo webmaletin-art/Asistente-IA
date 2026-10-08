@@ -80,6 +80,7 @@ object GeminiEngine {
             append("Opciones:\n")
             p.options.forEach { append("${it.label}. ${it.text}\n") }
             if (p.type == QType.MULTI_SELECT) append("Puede haber más de una respuesta correcta.\n")
+            if (p.type == QType.TRUE_FALSE) append("Es una afirmación o pregunta de verdadero/falso: elige V (verdadera) o F (falsa) en \"choice\" y explica en una frase.\n")
         }
     }
 

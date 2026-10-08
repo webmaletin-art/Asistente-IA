@@ -150,6 +150,12 @@ object QuestionParser {
     private fun questionAfter(lines: List<ScreenLine>, end: Int) =
         lines.drop(end).firstOrNull { it.text.contains('?') }?.text.orEmpty()
 
+    private val imperative = Regex("""^(define|explica|describe|menciona|nombra|enumera|calcula|resuelve|traduce|resume|escribe|completa|indica|cita|compara)\b""", RegexOption.IGNORE_CASE)
+
+    /** Afirmación copiada (≥6 palabras, sin «?»): se comprueba si es verdadera o falsa. */
+    private fun isStatement(q: String) = !q.contains('?') && !q.contains('¿') && q.length <= 300 &&
+        q.trim().split(Regex("\\s+")).size >= 6 && !imperative.containsMatchIn(q.trim())
+
     private fun finish(question: String, options: List<Option>, context: String): ParsedQuestion? {
         val q = question.replace(Regex("^\\s*[-•*–]\\s+"), "").replace(Regex("^\\s*(pregunta\\s*)?\\d{1,3}\\s*[\\.\\)\\:-]\\s*", RegexOption.IGNORE_CASE), "").trim()
         if (q.isBlank() && options.isEmpty()) return null
@@ -164,6 +170,7 @@ object QuestionParser {
             trCue.containsMatchIn(q) -> ParsedQuestion(QType.TRANSLATION, q, emptyList(), context)
             defCue.containsMatchIn(q) -> ParsedQuestion(QType.DEFINITION, q, emptyList(), context)
             context.length > 250 -> ParsedQuestion(QType.COMPREHENSION, q, emptyList(), context)
+            isStatement(q) -> ParsedQuestion(QType.TRUE_FALSE, q, listOf(Option("V", "Verdadero"), Option("F", "Falso")), context)
             else -> ParsedQuestion(QType.OPEN, q, emptyList(), context)
         }
     }

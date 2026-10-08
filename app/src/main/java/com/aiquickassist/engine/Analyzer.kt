@@ -38,7 +38,8 @@ object Analyzer {
             }
             EngineMode.BOTH -> both(p, image)
             else -> try {
-                val (g, url, note) = google(p, image, mode)
+                val (g0, url, note) = google(p, image, mode)
+                val g = annotate(p, g0)
                 AnalysisResult(p, mode, g, google = g, googleUrl = url, note = note, withImage = image != null)
             } catch (e: AnalysisException) {
                 // Respaldo opcional: si Google no responde y Gemini está configurado, responde Gemini (se etiqueta como Gemini)
@@ -56,7 +57,7 @@ object Analyzer {
 
     /** Elige el producto de Google: AI Mode para imágenes y modo AI Mode; Visión general para texto. */
     private suspend fun google(p: ParsedQuestion, image: CropImage?, mode: EngineMode): G {
-        val q = GoogleText.query(p)
+        val q = GoogleText.queryFor(p)
         if (image != null) {
             if (!Settings.aiModeEnabled || !Settings.aiUseImages)
                 throw AnalysisException("Google AI Mode está desactivado para imágenes (Configuración → Google AI Mode).")
@@ -84,7 +85,7 @@ object Analyzer {
             else Result.failure(AnalysisException("Gemini no está configurado.", needsGemini = true))
         }
         val g = gD.await(); val m = mD.await()
-        val gg = g.getOrNull(); val mm = m.getOrNull()
+        val gg = g.getOrNull()?.let { it.copy(block = annotate(p, it.block)) }; val mm = m.getOrNull()
         if (gg == null && mm == null) {
             val ge = g.exceptionOrNull() as? AnalysisException
             throw AnalysisException("Google: ${g.exceptionOrNull()?.message}. Gemini: ${m.exceptionOrNull()?.message}",
@@ -95,6 +96,24 @@ object Analyzer {
         val best = mm ?: gg!!.block
         AnalysisResult(p, EngineMode.BOTH, best, google = gg?.block, gemini = mm, note = note,
             googleUrl = gg?.url ?: (g.exceptionOrNull() as? AnalysisException)?.googleUrl, withImage = image != null)
+    }
+
+    /**
+     * Pone la letra/V/F solo si el propio texto de Google lo dice: una opción citada completa (y única) o una
+     * respuesta que empieza por «Sí» / «No». Si no, no se inventa elección.
+     */
+    fun annotate(p: ParsedQuestion, b: Block): Block {
+        if (b.choice.isNotEmpty() || p.options.isEmpty()) return b
+        val head = TextUtil.normalize(b.answer).trim()
+        val label: String? = if (p.type == QType.TRUE_FALSE) when {
+            Regex("^(si|correcto|cierto|verdadero|efectivamente|exacto|asi es)\\b").containsMatchIn(head) -> p.options.firstOrNull { it.label == "V" || TextUtil.normalize(it.text).startsWith("verd") }?.label
+            Regex("^(no|falso|incorrecto)\\b").containsMatchIn(head) -> p.options.firstOrNull { it.label == "F" || TextUtil.normalize(it.text).startsWith("fals") }?.label
+            else -> null
+        } else {
+            val text = TextUtil.normalize(b.answer + " " + b.explanation)
+            p.options.filter { o -> TextUtil.normalize(o.text).trim().let { it.length >= 3 && text.contains(it) } }.singleOrNull()?.label
+        }
+        return if (label == null) b else b.copy(choice = listOf(label))
     }
 
     fun compare(google: Block?, gemini: Block?, gErr: String?, mErr: String?): String? = when {

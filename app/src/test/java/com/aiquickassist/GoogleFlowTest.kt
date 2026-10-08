@@ -140,3 +140,29 @@ class CleanupTest {
         assertTrue(com.aiquickassist.capture.HighlightDetector.stats(px).contains("azul oscuro="))
     }
 }
+
+class CopyFlowTest {
+    @Test fun copiedStatementBecomesTrueFalse() {
+        val p = QuestionParser.parseText("La capital de Francia es París y está a orillas del Sena.")!!
+        assertEquals(QType.TRUE_FALSE, p.type)
+        assertEquals("V", p.options[0].label)
+        assertEquals("¿Es verdad que La capital de Francia es París y está a orillas del Sena?", GoogleText.queryFor(p))
+        // Una pregunta o una definición no se tratan como afirmación
+        assertEquals(QType.DEFINITION, QuestionParser.parseText("¿Qué es la fotosíntesis?")!!.type)
+        assertEquals(QType.OPEN, QuestionParser.parseText("Vista web")!!.type)
+    }
+
+    @Test fun annotateOnlyWhenGoogleSaysSo() {
+        val tf = QuestionParser.parseText("La capital de Francia es París y está a orillas del Sena.")!!
+        val yes = Analyzer.annotate(tf, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "Sí, París es la capital de Francia."))
+        assertEquals(listOf("V"), yes.choice)
+        val no = Analyzer.annotate(tf, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "No, la capital es otra."))
+        assertEquals(listOf("F"), no.choice)
+        assertTrue(Analyzer.annotate(tf, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "Depende del contexto histórico.")).choice.isEmpty())
+
+        val mc = QuestionParser.parseText("¿Capital de Francia?\nA. Madrid\nB. París\nC. Roma")!!
+        assertEquals(listOf("B"), Analyzer.annotate(mc, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "La capital de Francia es París.")).choice)
+        // Dos opciones citadas → ambiguo → sin elección
+        assertTrue(Analyzer.annotate(mc, Block(Origin.GOOGLE_AI_OVERVIEW, answer = "Madrid y París son capitales.")).choice.isEmpty())
+    }
+}

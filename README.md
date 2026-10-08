@@ -16,8 +16,8 @@ Kotlin · Jetpack Compose · Android nativo (minSdk 30).
 Cada respuesta lleva su fuente (`GOOGLE_AI_OVERVIEW`, `GOOGLE_AI_MODE`, `GOOGLE_SEARCH`, `GEMINI`, `OCR_LOCAL`, `UNKNOWN`) hasta la UI. Si Google no responde no se inventa nada: *«No se pudo obtener una respuesta confiable de Google»* + botón para abrir Google / AI Mode.
 
 ## Flujos
-- **Texto**: pregunta → Google Search → Visión general real si existe.
-- **OCR**: región → OCR local → texto → Google Search (igual que antes).
+- **Texto**: seleccionas la pregunta, tocas «Copiar» y tocas la burbuja → se pega solo (cada copia se usa una vez) → motor elegido. Preguntas, opciones, verdadero/falso y afirmaciones («¿es correcta?»). Si no hay texto nuevo copiado, lo dice; nunca adivina a partir de la página.
+- **OCR**: región → OCR local → texto → motor elegido. **Solo texto: nunca envía la imagen.**
 - **Imagen**: región → **recorte real** (PNG/JPEG en caché + `content://` por FileProvider) → Google AI Mode (o Gemini). El OCR solo aporta texto auxiliar. Puedes escribir una pregunta opcional en el selector.
 - **Imagen + pregunta**: recorte + pregunta → AI Mode / Gemini.
 
