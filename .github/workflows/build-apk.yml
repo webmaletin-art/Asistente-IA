@@ -29,10 +29,23 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Tests unitarios
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
       - name: Generar APK debug y release
-        run: ./gradlew assembleDebug assembleRelease --no-daemon
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+      # Si algo falla, guardamos los reportes y logs para poder diagnosticarlos y corregir el código.
+      - name: Publicar logs y reportes de error (si falla)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-y-reportes
+          path: |
+            app/build/reports/
+            app/build/outputs/logs/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Publicar app-debug.apk
         uses: actions/upload-artifact@v4

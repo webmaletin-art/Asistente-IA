@@ -65,6 +65,10 @@ fun HomeScreen(nav: Nav) {
         Text("Asistente rápido para analizar contenido", fontSize = 14.sp, color = C.sub, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
         WireButton("Navegador", Modifier.fillMaxWidth().padding(horizontal = 16.dp)) { nav.go("browser") }
         Spacer(Modifier.height(8.dp))
+        WireButton("DOFPA — estudio y consulta", Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            ctx.startActivity(android.content.Intent(ctx, com.aiquickassist.dofpa.ui.DofpaActivity::class.java))
+        }
+        Spacer(Modifier.height(8.dp))
         WireButton(if (Settings.bubbleEnabled) "Desactivar burbuja" else "Activar burbuja", Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             if (Settings.bubbleEnabled) { Settings.bubbleEnabled = false; OverlayService.stop(ctx) }
             else if (!canOverlay) {

@@ -5,3 +5,15 @@ local.properties
 .idea/
 captures/
 *.jks
+
+# DOFPA: el corpus/materiales institucionales NUNCA van al repo público
+/dofpa_work/
+corpus/
+*.rar
+*.r[0-9][0-9]
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.mp4
+!app/src/main/res/**

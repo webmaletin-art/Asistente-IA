@@ -37,6 +37,12 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <activity
+            android:name=".dofpa.ui.DofpaActivity"
+            android:exported="false"
+            android:label="DOFPA"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".service.OverlayService"
             android:exported="false"

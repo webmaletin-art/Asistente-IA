@@ -63,6 +63,12 @@ object GeminiEngine {
         return parse(text, p)
     }
 
+    /** Respuesta de texto libre a un prompt completo (lo usa DOFPA con fragmentos citados). */
+    suspend fun complete(prompt: String, image: Bitmap? = null): String {
+        if (!Settings.geminiEnabled || !SecureStore.hasGeminiKey()) throw AnalysisException("Gemini no está configurado.", needsGemini = true)
+        return call(prompt, image, json = false, maxTokens = 2048)
+    }
+
     /** Devuelve null si la conexión funciona o el mensaje de error. */
     suspend fun test(): String? = try {
         call("Responde únicamente con la palabra OK.", null); null
@@ -84,15 +90,16 @@ object GeminiEngine {
         }
     }
 
-    private suspend fun call(prompt: String, image: Bitmap?): String {
+    private suspend fun call(prompt: String, image: Bitmap?, json: Boolean = true, maxTokens: Int = 1024): String {
         val key = SecureStore.geminiKey() ?: throw AnalysisException("Gemini no está configurado.", needsGemini = true)
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (image != null) parts.put(JSONObject().put("inline_data",
             JSONObject().put("mime_type", "image/jpeg").put("data", toBase64(image))))
+        val genCfg = JSONObject().put("temperature", 0.2).put("maxOutputTokens", maxTokens)
+        if (json) genCfg.put("responseMimeType", "application/json")
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
-            .put("generationConfig", JSONObject().put("temperature", 0.2).put("maxOutputTokens", 1024)
-                .put("responseMimeType", "application/json")).toString()
+            .put("generationConfig", genCfg).toString()
         var last: AnalysisException? = null
         for (model in candidates()) {
             // 503/500: saturación temporal → un reintento corto y luego el siguiente modelo. 429 (cuota) no se esquiva.

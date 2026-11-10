@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -55,5 +56,13 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // DOFPA: base de conocimiento local y búsqueda offline (Room + FTS4)
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+    // DOFPA: extracción de texto de PDF en el propio dispositivo (sin servidor)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
     testImplementation("junit:junit:4.13.2")
 }

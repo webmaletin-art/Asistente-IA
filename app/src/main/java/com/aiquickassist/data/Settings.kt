@@ -66,6 +66,11 @@ object Settings {
     var geminiModel by str("geminiModel", "auto")
     var defaultTool by enum("defaultTool", Tool.TEXT)
 
+    // DOFPA (módulo de estudio/consulta documental). Motor: local | gemini | auto.
+    var dofpaEngine by str("dofpaEngine", "auto")
+    var dofpaInternet by bool("dofpaInternet", false)
+    var dofpaQuickAnswer by bool("dofpaQuickAnswer", true)
+
     // Google AI Mode
     var aiModeEnabled by bool("aiModeEnabled", true)
     var aiUseImages by bool("aiUseImages", true)
