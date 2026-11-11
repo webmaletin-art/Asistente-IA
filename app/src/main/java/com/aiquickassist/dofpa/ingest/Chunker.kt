@@ -24,7 +24,7 @@ object Chunker {
             fun flush() { if (buf.isNotBlank()) { out.add(Chunk(p.number, section, buf.toString().trim())); buf.setLength(0) } }
             for (para in paras) {
                 val firstLine = para.lineSequence().firstOrNull()?.trim().orEmpty()
-                if (header.matches(firstLine) && firstLine.length < 80) { flush(); section = firstLine.take(80) }
+                if (header.matches(firstLine) && firstLine.length < 160) { flush(); section = firstLine }
                 if (buf.length + para.length + 1 > MAX && buf.isNotEmpty()) flush()
                 if (para.length > MAX) {
                     flush()

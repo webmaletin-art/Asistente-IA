@@ -28,15 +28,20 @@ object GeminiEngine {
             .map { it.first }
     }
 
+    private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
+
     /** Consulta los modelos disponibles para la clave del usuario. */
     suspend fun listModels(): List<String> {
         val key = SecureStore.geminiKey() ?: return emptyList()
-        val j = JSONObject(Http.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", mapOf("x-goog-api-key" to key)))
+        val j = JSONObject(Http.get("$BASE/models?pageSize=200", mapOf("x-goog-api-key" to key), 20_000))
         val arr = j.optJSONArray("models") ?: return emptyList()
         return (0 until arr.length()).map { arr.getJSONObject(it) }
             .filter { m -> (0 until (m.optJSONArray("supportedGenerationMethods")?.length() ?: 0)).any { m.getJSONArray("supportedGenerationMethods").getString(it) == "generateContent" } }
             .map { it.getString("name") }
     }
+
+    /** Último error real (para mostrar la causa en DOFPA y en Ajustes). */
+    @Volatile var lastError: GeminiError? = null
 
     @Volatile private var ranked: List<String>? = null
 
@@ -66,13 +71,46 @@ object GeminiEngine {
     /** Respuesta de texto libre a un prompt completo (lo usa DOFPA con fragmentos citados). */
     suspend fun complete(prompt: String, image: Bitmap? = null): String {
         if (!Settings.geminiEnabled || !SecureStore.hasGeminiKey()) throw AnalysisException("Gemini no está configurado.", needsGemini = true)
-        return call(prompt, image, json = false, maxTokens = 2048)
+        return call(prompt, image, json = false, maxTokens = 4096)
     }
 
-    /** Devuelve null si la conexión funciona o el mensaje de error. */
+    /** Devuelve null solo si Gemini respondió de verdad; si no, el error comprensible (con detalle técnico). */
     suspend fun test(): String? = try {
-        call("Responde únicamente con la palabra OK.", null); null
-    } catch (e: AnalysisException) { e.message } catch (e: Exception) { "Sin conexión." }
+        val t = call("Respondé solamente con la palabra OK.", null, json = false, maxTokens = 1024)
+        if (t.isBlank()) "Gemini respondió vacío." else null
+    } catch (e: AnalysisException) { e.message } catch (e: Exception) { GeminiErrors.fromException(e).let { "${it.message} (${it.detail})" } }
+
+    /** Diagnóstico paso a paso, sin revelar la clave. */
+    suspend fun diagnose(): List<String> {
+        val out = ArrayList<String>()
+        val key = SecureStore.geminiKey()
+        if (key == null) { out += "✕ No hay clave guardada."; return out }
+        out += "• Clave guardada: ${key.length} caracteres, formato ${if (key.startsWith("AIza")) "esperado (AIza…)" else "NO estándar (debería empezar con AIza)"}" +
+            (if (key.any { it.isWhitespace() }) " · ⚠ contiene espacios" else "")
+        // 1) Conectividad sin clave: el servidor debe contestar 403 (prueba que hay red y TLS)
+        var t0 = System.currentTimeMillis()
+        try { Http.get("$BASE/models?pageSize=1", emptyMap(), 15_000); out += "• Servidor alcanzable (${System.currentTimeMillis() - t0} ms)" }
+        catch (e: HttpException) { out += "✓ Servidor alcanzable: HTTP ${e.code} sin clave, como se espera (${System.currentTimeMillis() - t0} ms)" }
+        catch (e: Exception) { val g = GeminiErrors.fromException(e); out += "✕ Red: ${g.message} [${g.detail}]"; return out }
+        // 2) Clave: listar modelos
+        t0 = System.currentTimeMillis()
+        val models = try { listModels().also { out += "✓ Clave aceptada: ${it.size} modelos disponibles (${System.currentTimeMillis() - t0} ms)" } }
+        catch (e: HttpException) { val g = GeminiErrors.fromHttp(e.code, e.body); out += "✕ Clave: ${g.message} [${g.detail}]"; return out }
+        catch (e: Exception) { val g = GeminiErrors.fromException(e); out += "✕ Clave: ${g.message} [${g.detail}]"; return out }
+        // 3) Modelo
+        resetModel()
+        val cands = candidates()
+        out += "• Modelo configurado: ${Settings.geminiModel} → se probará: ${cands.joinToString()}"
+        if (Settings.geminiModel != "auto" && models.none { it.removePrefix("models/") == Settings.geminiModel })
+            out += "⚠ El modelo «${Settings.geminiModel}» no figura en la lista de tu clave."
+        // 4) Generación real
+        t0 = System.currentTimeMillis()
+        try {
+            val t = call("Respondé solamente con la palabra OK.", null, json = false, maxTokens = 1024)
+            out += "✓ Respuesta real de ${resolved ?: cands.first()}: «${t.trim().take(40)}» (${System.currentTimeMillis() - t0} ms)"
+        } catch (e: AnalysisException) { out += "✕ Generación: ${e.message}" }
+        return out
+    }
 
     private fun buildPrompt(p: ParsedQuestion): String = buildString {
         append("Eres un asistente que resuelve preguntas de forma breve y precisa. Responde en el idioma de la pregunta.\n")
@@ -90,8 +128,8 @@ object GeminiEngine {
         }
     }
 
-    private suspend fun call(prompt: String, image: Bitmap?, json: Boolean = true, maxTokens: Int = 1024): String {
-        val key = SecureStore.geminiKey() ?: throw AnalysisException("Gemini no está configurado.", needsGemini = true)
+    private suspend fun call(prompt: String, image: Bitmap?, json: Boolean = true, maxTokens: Int = 2048): String {
+        val key = SecureStore.geminiKey()?.trim() ?: throw AnalysisException("Gemini no está configurado.", needsGemini = true)
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (image != null) parts.put(JSONObject().put("inline_data",
             JSONObject().put("mime_type", "image/jpeg").put("data", toBase64(image))))
@@ -100,34 +138,34 @@ object GeminiEngine {
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
             .put("generationConfig", genCfg).toString()
-        var last: AnalysisException? = null
+        var last: GeminiError? = null
         for (model in candidates()) {
-            // 503/500: saturación temporal → un reintento corto y luego el siguiente modelo. 429 (cuota) no se esquiva.
-            for (attempt in 0..1) {
-                try {
-                    val resp = Http.postJson("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent", body, mapOf("x-goog-api-key" to key))
-                    resolved = model
-                    return JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
-                        ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
-                        ?: throw AnalysisException("Gemini no devolvió respuesta.")
+            // Reintentos limitados con espera progresiva SOLO para errores transitorios; los permanentes se informan al instante.
+            for (attempt in 0..2) {
+                val err: GeminiError = try {
+                    val resp = Http.postJson("$BASE/models/$model:generateContent", body, mapOf("x-goog-api-key" to key), 60_000)
+                    val (text, e) = GeminiErrors.parseText(resp)
+                    if (text != null) { resolved = model; lastError = null; return text }
+                    e!!
                 } catch (e: HttpException) {
-                    when (e.code) {
-                        400, 401, 403 -> throw AnalysisException("Gemini rechazó la clave o la solicitud (${e.code}). Revisa la configuración.")
-                        429 -> throw AnalysisException("Se agotó la cuota de tu clave de Gemini. Inténtalo más tarde.")
-                        404 -> { last = AnalysisException("Modelo de Gemini no encontrado: $model."); break }
-                        500, 502, 503, 504 -> {
-                            last = AnalysisException("Gemini está saturado (${e.code}). Es temporal: vuelve a intentarlo en unos segundos.")
-                            if (attempt == 0) kotlinx.coroutines.delay(1200)
-                        }
-                        else -> throw AnalysisException("Error de Gemini (${e.code}).")
-                    }
+                    GeminiErrors.fromHttp(e.code, e.body, model)
+                } catch (e: org.json.JSONException) {
+                    GeminiError(GeminiFail.OTHER, "Respuesta de Gemini con formato inesperado.", e.message.orEmpty().take(120))
                 } catch (e: java.io.IOException) {
-                    throw AnalysisException("Sin conexión con Gemini.")
+                    GeminiErrors.fromException(e)
                 }
+                last = err; lastError = err
+                if (err.kind == GeminiFail.MODEL_NOT_FOUND) break          // probar el siguiente modelo
+                if (!err.kind.transient || attempt == 2) {
+                    if (err.kind.transient) break                          // agotados los reintentos: siguiente modelo
+                    throw AnalysisException("${err.message} [${err.detail}]")
+                }
+                kotlinx.coroutines.delay(if (err.retryAfterMs > 0) err.retryAfterMs else 1000L * (attempt + 1) * (attempt + 1))
             }
         }
         ranked = null
-        throw last ?: AnalysisException("Gemini no respondió.")
+        val e = last ?: GeminiError(GeminiFail.OTHER, "Gemini no respondió.")
+        throw AnalysisException("${e.message} [${e.detail}]")
     }
 
     private fun parse(raw: String, p: ParsedQuestion): Block {

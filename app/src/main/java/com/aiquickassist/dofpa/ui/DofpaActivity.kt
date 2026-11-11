@@ -11,8 +11,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import com.aiquickassist.data.Settings
+import com.aiquickassist.dofpa.data.CorpusRepo
 import com.aiquickassist.dofpa.data.DofpaRepo
+import com.aiquickassist.dofpa.engine.ChatContext
 import com.aiquickassist.ui.AppTheme
 import kotlinx.coroutines.launch
 
@@ -22,45 +23,60 @@ class DofpaActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         DofpaRepo.init(this)
+        CorpusRepo.init(this)
         setContent {
             AppTheme {
                 val ctx = LocalContext.current
                 val scope = rememberCoroutineScope()
                 val stack = remember { mutableStateListOf("home") }
                 val nav = remember { DofpaNav(stack) }
+                val chat = remember { ChatContext() }
 
-                // Importador de documentos del usuario (Storage Access Framework)
-                val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
-                    if (uris.isNotEmpty()) scope.launch {
-                        val res = DofpaRepo.import(ctx, uris)
-                        val ok = res.count { it.status != "ERROR" }
-                        val err = res.size - ok
-                        Toast.makeText(ctx, "Importados $ok · con error $err", Toast.LENGTH_LONG).show()
+                // Paquete maestro (.dofpa) generado a partir de todo el material
+                val packagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+                    if (uri != null) scope.launch {
+                        val msg = CorpusRepo.importPackage(ctx, uri)
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
                     }
                 }
-                val onImport = { picker.launch(arrayOf("application/pdf",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    "text/*", "image/*")) }
+                // Documentos sueltos (PDF, DOCX, PPTX, TXT, imágenes)
+                val docsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+                    if (uris.isNotEmpty()) scope.launch {
+                        val res = CorpusRepo.importDocuments(ctx, uris)
+                        Toast.makeText(ctx, "Importados ${res.count { it.status != "ERROR" }} · con error ${res.count { it.status == "ERROR" }}", Toast.LENGTH_LONG).show()
+                    }
+                }
+                val actions = LibraryActions(
+                    importPackage = { packagePicker.launch(arrayOf("*/*")) },
+                    importDocs = { docsPicker.launch(arrayOf("application/pdf",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation", "text/*", "image/*")) }
+                )
 
-                // Siembra de datos de prueba la primera vez (hasta que el usuario cargue su material)
-                LaunchedEffect(Unit) { scope.launch { runCatching { DofpaRepo.seedDemoIfEmpty() } } }
+                LaunchedEffect(Unit) { CorpusRepo.bootstrap() }
 
                 BackHandler(enabled = stack.size > 1) { nav.back() }
-                when (val route = stack.last()) {
-                    "home" -> DofpaHome(nav)
-                    "chat" -> DofpaChatScreen(nav)
-                    "search" -> DofpaSearchScreen(nav)
-                    "library" -> DofpaLibraryScreen(nav, onImport)
-                    "notebook" -> NotebookScreen(nav)
-                    "settings" -> DofpaSettingsScreen(nav)
-                    else -> if (route.startsWith("doc:")) DocumentScreen(nav, route.removePrefix("doc:").toLong())
-                    else DofpaStub(nav, route)
+                val route = stack.last()
+                when {
+                    route == "home" -> DofpaHome(nav)
+                    route == "chat" -> DofpaChatScreen(nav, chat)
+                    route == "search" -> DofpaSearchScreen(nav)
+                    route == "library" -> DofpaLibraryScreen(nav, actions)
+                    route == "notebook" -> NotebookScreen(nav, chat)
+                    route == "settings" -> DofpaSettingsScreen(nav)
+                    route == "academia" -> AcademiaScreen(nav)
+                    route.startsWith("doc:") -> {
+                        val parts = route.removePrefix("doc:").split(':')
+                        DocumentScreen(nav, parts[0].toLong(), parts.getOrNull(1)?.toIntOrNull() ?: 0)
+                    }
+                    else -> DofpaStub(nav, route)
                 }
             }
         }
     }
 }
+
+class LibraryActions(val importPackage: () -> Unit, val importDocs: () -> Unit)
 
 class DofpaNav(private val stack: MutableList<String>) {
     fun go(route: String) { if (stack.last() != route) stack.add(route) }

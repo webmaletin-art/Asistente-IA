@@ -70,6 +70,7 @@ object Settings {
     var dofpaEngine by str("dofpaEngine", "auto")
     var dofpaInternet by bool("dofpaInternet", false)
     var dofpaQuickAnswer by bool("dofpaQuickAnswer", true)
+    var dofpaAiModeFallback by bool("dofpaAiModeFallback", true)
 
     // Google AI Mode
     var aiModeEnabled by bool("aiModeEnabled", true)

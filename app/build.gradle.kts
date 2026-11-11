@@ -65,4 +65,6 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")       // org.json real en tests JVM
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.0") // SQLite real (FTS4) para probar el buscador en JVM
 }

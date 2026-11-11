@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -194,6 +195,7 @@ fun GeminiScreen(nav: Nav) {
     var busy by remember { mutableStateOf(false) }
     var model by remember { mutableStateOf(Settings.geminiModel) }
     var usedModel by remember { mutableStateOf<String?>(null) }
+    var diag by remember { mutableStateOf<List<String>>(emptyList()) }
 
     Screen("Gemini", nav::back) {
         SwitchItem("Usar Gemini", Settings.geminiEnabled) { Settings.geminiEnabled = it }
@@ -238,9 +240,23 @@ fun GeminiScreen(nav: Nav) {
                 busy = true; status = null
                 scope.launch {
                     val err = GeminiEngine.test()
-                    status = err ?: "Conectado"; statusOk = err == null
+                    status = err ?: "Conectado: Gemini respondió correctamente."; statusOk = err == null
                     if (err == null) usedModel = runCatching { GeminiEngine.model() }.getOrNull()
                     busy = false
+                }
+            }
+            WireButton(if (busy) "Diagnosticando…" else "Diagnóstico completo", Modifier.fillMaxWidth(), enabled = configured && !busy) {
+                busy = true; diag = listOf("Diagnosticando…")
+                scope.launch { diag = runCatching { GeminiEngine.diagnose() }.getOrElse { listOf("✕ ${it.javaClass.simpleName}: ${it.message}") }; busy = false }
+            }
+            if (diag.isNotEmpty()) {
+                val ctx2 = LocalContext.current
+                Column(Modifier.fillMaxWidth().background(C.surface).padding(10.dp)) {
+                    diag.forEach { Text(it, fontSize = 12.sp, color = if (it.startsWith("✕")) C.err else if (it.startsWith("✓")) C.ok else C.text) }
+                    Text("Copiar diagnóstico", fontSize = 12.sp, color = C.blue, modifier = Modifier.padding(top = 6.dp).clickable {
+                        val cm = ctx2.getSystemService(android.content.ClipboardManager::class.java)
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Diagnóstico Gemini", diag.joinToString("\n")))
+                    })
                 }
             }
             WireButton("Eliminar configuración", Modifier.fillMaxWidth(), enabled = configured) {
