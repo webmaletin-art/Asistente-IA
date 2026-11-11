@@ -1,43 +1,35 @@
-# DOFPA — Matriz de funciones y estado
+# DOFPA — Funciones y estado (registro honesto)
 
-Estados: ✅ implementado · 🧪 probado (compila/test) · 🚧 en progreso · ⬜ pendiente · 🔒 bloqueado
+Estados: ✅ implementado y probado · 🟡 implementado, sin probar en un teléfono · 🚧 parcial · ⬜ pendiente (solo diseñado o nada)
 
-## Etapa 1 (esta entrega)
-| Función | Estado | Notas |
+## Revisión integral (esta entrega)
+| Función | Estado | Cómo se verificó |
 |---|---|---|
-| Base de conocimiento local (Room + FTS4) | ✅ 🧪 | Todo en el dispositivo. `dofpa/data` |
-| Importador de documentos (SAF, elige el usuario) | ✅ | PDF, DOCX, PPTX, TXT/MD, imágenes |
-| Extracción de texto en el teléfono | ✅ | PDF (PDFBox), DOCX/PPTX (XML), TXT, imagen (OCR local) |
-| `.doc` antiguo / sin capa de texto | 🔒 | Reporta error honesto; pide convertir a PDF/DOCX |
-| Segmentación con anclaje (página/sección/artículo) | ✅ 🧪 | `Chunker` detecta ARTÍCULO/TÍTULO/CAPÍTULO/UNIDAD |
-| Buscador universal local (FTS, prefijos, sinónimos básicos) | ✅ | `DofpaSearchScreen` |
-| Chat de Consulta con citas | ✅ | Respuesta cita documento·página·sección |
-| Enrutamiento local / Gemini / auto + fallback honesto | ✅ | `DofpaBrain`; Gemini recibe solo fragmentos |
-| Respuesta rápida + ampliar | ✅ | Acordeón "Ver más" |
-| Preguntas sugeridas plegables (se colocan, no se envían) | ✅ | Derivadas localmente, sin gastar IA |
-| Acciones: Copiar / Guardar en Cuaderno / Abrir AI Mode | ✅ | AI Mode solo si el usuario activa Internet |
-| Mi Cuaderno (notas locales) | ✅ | Crear desde el chat, borrar |
-| Biblioteca (gestión, borrar demo) | ✅ | Estado por documento |
-| Ajustes DOFPA (motor, Internet, respuesta rápida) | ✅ | |
-| Datos ficticios de prueba | ✅ | `DemoCorpus`; borrables |
-| Entrada desde AI Quick Assist | ✅ | Botón "DOFPA" en la pantalla principal |
-| AI Quick Assist intacto (regresión) | 🧪 | Tests unitarios verdes |
+| Procesamiento del corpus completo (14 RAR → 95 archivos, duplicados, OCR, estructura) | ✅ | `tools/dofpa/`; informe privado de extracción (no está en el repo) |
+| Paquete maestro único `.dofpa` (SQLite + metadatos + hash) | ✅ | 76 documentos, 6.323 fragmentos, 1,4 MB; hash verificado con el mismo código que usa la app |
+| Importar el paquete en la app (verifica formato/versión/hash, reindexa, copia de seguridad, restaurar, progreso, sin bloquear la UI) | 🟡 | Compila; la verificación y el reindexado se probaron en JVM con SQLite real. Falta probarlo en el teléfono |
+| Buscador: leyes y artículos exactos, BM25, títulos/capítulos, frases, sinónimos, alias de leyes, errores de tipeo, seguimiento, "no encontrado" | ✅ | 14 casos de aceptación (corpus ficticio) + 27 contra el corpus real; todos pasan |
+| "Explica la 23.737" responde sobre la 23.737 (no sobre la 9169) | ✅ | `RealCorpusEvalTest.e01`, `SearchAcceptanceTest.c01` |
+| "¿En qué parte del Manual…?" devuelve la página/sección real, no la portada | ✅ | `e08`, `c03`, `c10` |
+| Velocidad < 500 ms en local | ✅ (JVM) | 12–170 ms sobre el corpus real en la JVM; en el teléfono puede ser más lento: 🟡 |
+| Gemini: errores reales (clave inválida, permiso, modelo, cuota diaria vs por minuto, servidor, red, TLS, timeout) | ✅ | `GeminiErrorsTest` con respuestas reales capturadas del servidor |
+| Gemini: reintentos limitados con espera progresiva; los errores permanentes se muestran enseguida | ✅ | Revisión de código + tests |
+| "Probar conexión" real + "Diagnóstico completo" | 🟡 | Hace una petición real; sin una clave válida en este entorno no se pudo ver una respuesta OK |
+| Clave Gemini en Android Keystore, nunca en el código/APK | ✅ | Sin cambios respecto de la versión anterior |
+| Consulta: respuesta directa + Ver más, fuentes ordenadas con página/capítulo, Copiar/Guardar/Compartir | 🟡 | Compila; no se probó en un teléfono |
+| Más fácil / Ejemplo / Localizar / ¿Sigue vigente? / Preguntar a Google (AI Mode) | 🟡 | Compila |
+| Sugerencias plegables que se colocan en el campo (no se envían solas) | 🟡 | Compila |
+| Leyes, artículos y conceptos tocables (explicación sin salir del chat) | 🟡 | Compila |
+| Varias preguntas en un mensaje | ✅ | `c05` |
+| Etiqueta de motor usado (Academia / IA / Google / no encontrado) | 🟡 | Compila |
+| Mi Cuaderno | 🟡 | Ya existía (Room); sin cambios de fondo |
+| AI Quick Assist sin cambios de comportamiento | ✅ | Sus tests unitarios pasan |
 
-## Próximas etapas (pendientes)
+## Pendiente (NO está hecho)
 | Función | Estado |
 |---|---|
-| Conceptos tocables dentro del texto (modal sin salir del chat) | ⬜ |
-| Modo Guía (checklist con fundamento y estados) | ⬜ |
-| Actas inteligentes (ayuda por campo, borrador DOCX/PDF) | ⬜ |
-| Academia (Enseñame, unidades, progreso) | ⬜ |
-| Exámenes / Entrenamiento 5 min / preguntas al azar | ⬜ |
-| Niveles de conocimiento y repaso espaciado ("Lo quiero recordar") | ⬜ |
-| Contraste con Internet lado a lado + vigencia | ⬜ |
-| Recursos visuales (catálogo, solo autorizados) / DOFPA Visual | ⬜ |
-| Ranking de búsqueda mejor (bm25/FTS5), sinónimos/glosario | ⬜ |
-| Pruebas instrumentadas en dispositivo | ⬜ (requiere dispositivo) |
-
-## Verificado realmente
-- `./gradlew assembleDebug assembleRelease` → OK (APK ~81 MB).
-- `./gradlew testDebugUnitTest` → OK (tests de AI Quick Assist).
-- NO probado en dispositivo físico (importación real, OCR de escaneos, rendimiento): pendiente.
+| Academia completa (unidades, progreso), exámenes, V/F, opción múltiple, relacionar, artículos | ⬜ (hay una pantalla con la lista de materias) |
+| Entrenamiento 5 min, repetición espaciada, conceptos dominados, ¿Sabías que?, juegos | ⬜ |
+| Modo Guía, Actas inteligentes, Modo calle | ⬜ |
+| DOFPA Visual (proyecto HTML/CSS/JS aparte) | ⬜ |
+| Pruebas en un teléfono real (importación, OCR, rendimiento, Gemini con una clave real) | ⬜ |
